@@ -6,6 +6,7 @@
 *.so
 mnist/
 data/
+!data/coco/annotations/*
 caffe/
 grasp/
 images/
@@ -13,11 +14,14 @@ opencv/
 convnet/
 decaf/
 submission/
-cfg/
 build/darknet/*
 !build/darknet/YoloWrapper.cs
 .fuse*
-
+*.weights
+src/*
+darknet_evaluate/src/*
+!src/detector.c
+!darknet_evaluate/src/detector.c
 # OS Generated #
 .DS_Store*
 ehthumbs.db
@@ -28,3 +32,42 @@ Thumbs.db
 # CMake #
 cmake-build-debug/
 CMakeLists.txt
+darknet53.conv.74
+darknet_evaluate/darknet53.conv.74
+backup/*
+darknet_evaluate/backup/*
+
+### GitIgnore on Darknet Evaluate Subdirectory ###
+darknet_evaluate/data/
+!darknet_evaluate/data/coco/annotations/*
+darknet_evaluate/caffe/
+darknet_evaluate/grasp/
+darknet_evaluate/images/
+darknet_evaluate/opencv/
+darknet_evaluate/convnet/
+darknet_evaluate/decaf/
+darknet_evaluate/submission/
+darknet_evaluate/build/darknet/*
+!darknet_evaluate/build/darknet/YoloWrapper.cs
+darknet_evaluate/.fuse*
+
+# OS Generated #
+darknet_evaluate/.DS_Store*
+darknet_evaluate/ehthumbs.db
+darknet_evaluate/Icon?
+darknet_evaluate/Thumbs.db
+darknet_evaluate/*.swp
+darknet_evaluate/*.weights
+darknet_evaluate/trained_weights
+!darknet_evaluate/trained_weights/training_runs/**/*.txt
+!darknet_evaluate/trained_weights/training_runs/**/*.txt.backup
+!darknet_evaluate/cfg/*
+
+bad.list
+darknet_evaluate/bad.list
+bad_label.list
+darknet_evaluate/bad_label.list
+
+# CMake #
+darknet_evaluate/cmake-build-debug/
+darknet_evaluate/CMakeLists.txt

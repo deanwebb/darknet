@@ -1,0 +1,8 @@
+classes= 80
+#train  = /media/dean/datastore/datasets/darknet/data/coco/labels/train2014/image_list.txt
+train = /media/dean/datastore/datasets/darknet/data/coco/trainvalno5k.txt
+valid  = coco_testdev
+#valid = data/coco_val_5k.list
+names = /media/dean/datastore/datasets/darknet/data/coco.names
+backup = /media/dean/datastore/datasets/darknet/backup/
+eval=coco

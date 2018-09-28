@@ -1,0 +1,6 @@
+classes= 10
+train  = /media/anthony/deans_data/darknet/data/coco/labels/train2014/manifast.txt
+valid  = /media/anthony/deans_data/darknet/data/coco/labels/train2014/image_list.txt
+names = /media/anthony/deans_data/darknet/data/coco.bdd100k.names
+backup = /media/anthony/deans_data/darknet/backup
+eval=coco
