@@ -793,6 +793,7 @@ void free_network(network net)
 #ifdef GPU
     if (gpu_index >= 0) cuda_free(net.workspace);
     else free(net.workspace);
+    if (net.input_state_gpu) cuda_free(net.input_state_gpu);
     if (*net.input_gpu) cuda_free(*net.input_gpu);
     if (*net.truth_gpu) cuda_free(*net.truth_gpu);
     if (net.input_gpu) free(net.input_gpu);
@@ -862,8 +863,13 @@ void calculate_binary_weights(network net)
             if (l->xnor) {
                 //printf("\n %d \n", j);
                 l->lda_align = 256; // 256bit for AVX2
+                //if (l->size*l->size*l->c >= 2048) l->lda_align = 512;
 
                 binary_align_weights(l);
+
+                if(net.layers[j].use_bin_output) {
+                    l->activation = LINEAR;
+                }
             }
         }
     }
