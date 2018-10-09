@@ -1,0 +1,46 @@
+name: ros-kache
+channels:
+    - https://conda.anaconda.org/menpo
+    - conda-forge
+dependencies:
+    - python==3.6
+    - numpy
+    - sympy
+    - matplotlib
+    - jupyter
+    - opencv3
+    - nb_conda
+    - pillow
+    - scikit-learn
+    - scikit-image
+    - scipy
+    - h5py
+    - eventlet
+    - flask-socketio
+    - seaborn
+    - pandas
+    - imageio=2.1.2
+    - accelerate
+    - tensorflow-gpu
+    - cython
+    - filterpy==1.4.1
+    - numba
+    - pip:
+        - moviepy
+        - git+https://github.com/fchollet/keras.git
+        - socketIO-client
+        - transforms3d
+        - pyqtgraph
+        - PyQt5
+        - cython
+        - git+https://github.com/philferriere/cocoapi.git#egg=pycocotools&subdirectory=PythonAPI
+        - opencv-python
+        - torch
+        - six
+        - python-dateutil
+        - setuptools
+        - kiwisolver
+        - pytz
+        - pyparsing
+        - cycler
+        - tqdm
