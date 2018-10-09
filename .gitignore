@@ -6,7 +6,7 @@
 *.so
 mnist/
 data/
-!data/coco/annotations/*
+!data/coco/annotations/*.json
 caffe/
 grasp/
 images/
@@ -39,7 +39,7 @@ darknet_evaluate/backup/*
 
 ### GitIgnore on Darknet Evaluate Subdirectory ###
 darknet_evaluate/data/
-!darknet_evaluate/data/coco/annotations/*
+!darknet_evaluate/data/coco/annotations/*.json
 darknet_evaluate/caffe/
 darknet_evaluate/grasp/
 darknet_evaluate/images/
@@ -57,8 +57,10 @@ darknet_evaluate/ehthumbs.db
 darknet_evaluate/Icon?
 darknet_evaluate/Thumbs.db
 darknet_evaluate/*.swp
+
+
 darknet_evaluate/*.weights
-darknet_evaluate/trained_weights
+darknet_evaluate/trained_weights/
 !darknet_evaluate/trained_weights/training_runs/**/*.txt
 !darknet_evaluate/trained_weights/training_runs/**/*.txt.backup
 !darknet_evaluate/cfg/*

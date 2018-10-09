@@ -1,6 +1,6 @@
 classes= 10
-#train  = /media/dean/datastore1/datasets/darknet_evaluate/data/coco/labels/train2014/manifast.txt
-valid  = /media/dean/datastore1/datasets/darknet_evaluate/data/coco/labels/train2014/manifast.txt
-names = /media/dean/datastore1/datasets/darknet_evaluate/data/coco.bdd100k.names
-backup = /media/dean/datastore1/datasets/darknet_evaluate/backup
+#train  = /media/dean/datastore1/datasets/darknet/darknet_evaluate/data/coco/labels/train2014/manifast.txt
+valid  = /media/dean/datastore1/datasets/darknet/darknet_evaluate/data/coco/labels/train2014/manifast.txt
+names = /media/dean/datastore1/datasets/darknet/darknet_evaluate/data/coco.bdd100k.names
+backup = /media/dean/datastore1/datasets/darknet/darknet_evaluate/backup
 eval=coco
