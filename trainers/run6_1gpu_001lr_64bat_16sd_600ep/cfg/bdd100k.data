@@ -1,7 +1,0 @@
-gpus=0
-classes=12
-train=/media/dean/datastore1/datasets/darknet/trainers/run6_1gpu_001lr_64bat_16sd_600ep/data/coco/labels/val2014/manifast.txt
-valid=/media/dean/datastore1/datasets/darknet/trainers/run6_1gpu_001lr_64bat_16sd_600ep/data/coco/labels/val2014/manifast.txt
-names=/media/dean/datastore1/datasets/darknet/trainers/run6_1gpu_001lr_64bat_16sd_600ep/cfg/COCO_val2014_0000.names
-backup=/media/dean/datastore1/datasets/darknet/trainers/run6_1gpu_001lr_64bat_16sd_600ep/backup
-eval=coco

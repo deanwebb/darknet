@@ -89,7 +89,6 @@ struct layer{
     int index;
     int binary;
     int xnor;
-    int use_bin_output;
     int steps;
     int hidden;
     float dot;
