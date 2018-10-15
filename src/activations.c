@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 char *get_activation_string(ACTIVATION a)
 {
     switch(a){
@@ -148,4 +149,3 @@ void gradient_array(const float *x, const int n, const ACTIVATION a, float *delt
         delta[i] *= gradient(x[i], a);
     }
 }
-

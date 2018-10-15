@@ -28,6 +28,7 @@ ehthumbs.db
 Icon?
 Thumbs.db
 *.swp
+*.pickle
 
 # CMake #
 cmake-build-debug/

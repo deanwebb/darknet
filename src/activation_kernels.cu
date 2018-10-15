@@ -8,6 +8,7 @@ extern "C" {
 }
 
 
+
 __device__ float lhtan_activate_kernel(float x)
 {
     if(x < 0) return .001*x;
@@ -47,7 +48,7 @@ __device__ float stair_activate_kernel(float x)
     if (n%2 == 0) return floor(x/2.);
     else return (x - n) + floor(x/2.);
 }
- 
+
 
 __device__ float hardtan_gradient_kernel(float x)
 {
@@ -152,13 +153,13 @@ __global__ void gradient_array_kernel(float *x, int n, ACTIVATION a, float *delt
     if(i < n) delta[i] *= gradient_kernel(x[i], a);
 }
 
-extern "C" void activate_array_ongpu(float *x, int n, ACTIVATION a) 
+extern "C" void activate_array_ongpu(float *x, int n, ACTIVATION a)
 {
     activate_array_kernel<<<cuda_gridsize(n), BLOCK, 0, get_cuda_stream()>>>(x, n, a);
     check_error(cudaPeekAtLastError());
 }
 
-extern "C" void gradient_array_ongpu(float *x, int n, ACTIVATION a, float *delta) 
+extern "C" void gradient_array_ongpu(float *x, int n, ACTIVATION a, float *delta)
 {
     gradient_array_kernel<<<cuda_gridsize(n), BLOCK>>>(x, n, a, delta);
     check_error(cudaPeekAtLastError());
