@@ -138,21 +138,23 @@ class Darkernet():
         return module_defs
 
 
-    def save_model_config(self, model_defs, path):
-        """Saves the yolo-v3 layer configuration file"""
-        with open(path, 'w') as writer:
+    def save_model_config(self, model_defs, path, overwrite = False):
+        if not os.path.exists(path) or overwrite == True:
+            """Saves the yolo-v3 layer configuration file"""
+            with open(path, 'w') as writer:
 
-            for block in model_defs:
-                writer.write('['+ block['type'] +']'+'\n')
-                [writer.write(str(k)+'='+str(v)+'\n') for k,v in block.items() if k != 'type']
-                writer.write('\n')
+                for block in model_defs:
+                    writer.write('['+ block['type'] +']'+'\n')
+                    [writer.write(str(k)+'='+str(v)+'\n') for k,v in block.items() if k != 'type']
+                    writer.write('\n')
         return path
 
 
-    def save_data_config(self, data_config, path):
+    def save_data_config(self, data_config, path, overwrite = False):
         """Saves the yolo-v3 data configuration file"""
-        with open(path, 'w') as writer:
-            [writer.write(str(k)+'='+str(v)+'\n') for k,v in data_config.items()]
+        if not os.path.exists(path) or overwrite == True:
+            with open(path, 'w') as writer:
+                [writer.write(str(k)+'='+str(v)+'\n') for k,v in data_config.items()]
         return path
 
 

@@ -41,10 +41,6 @@ class Format(Enum):
     kache = 5
     open_imgs = 6
 
-##########  ############
-##      Refactor      ##
-##########  ############
-
 BASE_DIR = '/media/dean/datastore1/datasets/BerkeleyDeepDrive/'
 BDD100K_DIRECTORY = os.path.join(BASE_DIR, 'bdd100k')
 DEFAULT_IMG_EXTENSION = '.jpg'
@@ -385,7 +381,13 @@ class DataFormatter(object):
 
         print('Length of COCO Images', len(self._images))
 
-    def merge_data(self, merging_set, merging_cats=[]):
+    def merge(self, merging_set, include_cats=None, exclude_cats = None):
+        # If include_cats is None, include *all* cats
+        # If exclude casts is None, exclude *none*
+
+        if include_cats:
+        else:
+
         pass
 
 

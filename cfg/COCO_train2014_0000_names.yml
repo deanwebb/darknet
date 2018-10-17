@@ -1,0 +1,12 @@
+- name: bike
+- name: bus
+- name: car
+- name: drivable area
+- name: lane
+- name: motor
+- name: person
+- name: rider
+- name: traffic light
+- name: traffic sign
+- name: train
+- name: truck
