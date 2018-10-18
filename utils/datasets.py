@@ -498,7 +498,7 @@ class DataFormatter(object):
                 destination, _ = urllib.request.urlretrieve(source_uri, destination)
                 statinfo = os.stat(destination)
             elif self.s3_bucket:
-                print('SOURCE: ', self.send_to_s3(source_uri))
+                print('SOURCE: ', self.send_to_s3(source_uri.replace(self.trainer_prefix, '')))
                 print('DEST: ', destination)
                 destination, _ = urllib.request.urlretrieve(self.send_to_s3(source_uri), destination)
             else:
