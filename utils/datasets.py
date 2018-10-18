@@ -498,6 +498,8 @@ class DataFormatter(object):
             elif urllib.parse.urlparse(source_uri).scheme != "":
                 destination, _ = urllib.request.urlretrieve(source_uri, destination)
                 statinfo = os.stat(destination)
+            elif self.s3_bucket:
+                destination = self.download_from_s3(destination)
             else:
                 print('Could not copy file', source_uri, 'to file:', destination, '. Does not exist')
 
@@ -544,8 +546,13 @@ class DataFormatter(object):
             if not exists:
                 s3_bucket = 's3://'+self.s3_bucket
                 res = subprocess.call("aws s3 cp {} {}".format(img_path, s3_bucket))
-                print(res)
         return os.path.join('https://s3-us-west-2.amazonaws.com', s3_path)
+
+    def download_from_s3(self, img_path):
+        s3_path = os.path.join(self.s3_bucket,self.path_leaf(img_path))
+        s3_bucket_path = 's3://'+s3_path
+        res = subprocess.call("aws s3 cp {} {}".format(s3_bucket_path, img_path))
+        return img_path
 
     def generate_names_cfg(self):
         self.names_config = os.path.join(self.config_dir, self.trainer_prefix+'.names')
