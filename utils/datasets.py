@@ -552,9 +552,9 @@ class DataFormatter(object):
             uri = img_path.replace(self.trainer_prefix,'')
         else:
             uri = img_path
-    
+
         s3uri = self.send_to_s3(uri)
-        res = subprocess.call("wget -P {} {}".format(img_path, s3uri))
+        res = subprocess.call("curl -o {} {}".format(img_path, s3uri))
         return img_path
 
     def generate_names_cfg(self):
