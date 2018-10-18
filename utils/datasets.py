@@ -494,6 +494,11 @@ class DataFormatter(object):
             if os.path.exists(source_uri):
                 os.makedirs(os.path.split(destination)[0], exist_ok = True)
                 shutil.copyfile(source_uri, destination)
+            # Try checking coco path for image (since they are mixed)
+            elif os.path.exists(os.path.join(os.getcwd(), 'data/coco/images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))):
+                    source_uri = os.path.join(os.getcwd(), 'data/coco/images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
+                    os.makedirs(os.path.split(destination)[0], exist_ok = True)
+                    shutil.copyfile(source_uri, destination)
             elif urllib.parse.urlparse(source_uri).scheme != "":
                 destination, _ = urllib.request.urlretrieve(source_uri, destination)
                 statinfo = os.stat(destination)
