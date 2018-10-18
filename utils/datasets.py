@@ -41,6 +41,10 @@ class Format(Enum):
     kache = 5
     open_imgs = 6
 
+##########  ############
+##      Refactor      ##
+##########  ############
+
 BASE_DIR = '/media/dean/datastore1/datasets/BerkeleyDeepDrive/'
 BDD100K_DIRECTORY = os.path.join(BASE_DIR, 'bdd100k')
 DEFAULT_IMG_EXTENSION = '.jpg'
@@ -380,15 +384,109 @@ class DataFormatter(object):
                 pickle.dump(pickle_dict, pickle_out)
 
         print('Length of COCO Images', len(self._images))
+        self.show_data_distribution()
 
-    def merge(self, merging_set, include_cats=None, exclude_cats = None):
-        # If include_cats is None, include *all* cats
-        # If exclude casts is None, exclude *none*
+    def merge(self, merging_set, include = [], exclude = None, reject_new_categories = True):
+        # If any categories in include, merge them with datasets
+        include = [x.replace(' ','').lower() for x in include]
+        deletions = []
+        for fname in merging_set._images.keys():
+            delete_marker = True
 
-        if include_cats:
+            for  ann in merging_set._annotations[fname]:
+                ## Only include images with annotations corresponding to this category_id
+                if ann['category'].replace(' ', '').lower() in include:
+                    delete_marker = False
+                    break
+
+            if delete_marker:
+                deletions.append(fname)
+
+        for fname in deletions:
+            merging_set._images.pop(fname)
+            merging_set._annotations.pop(fname)
+
+
+        ## Exclude block ##
+        deletions = []
+        ann_deletions = []
+
+        # Set exclude to all remaining categories if None
+        if not exclude:
+            exclude = [x for x in self.category_names if x not in include]
+        exclude = [x.replace(' ','').lower() for x in exclude]
+        # If any categories in exclude, remove any image associated with categories.
+        for fname in merging_set._images.keys():
+            delete_marker = False
+            for  ann in merging_set._annotations[fname]:
+                ## Exclude images with annotations corresponding to this category_id
+                if ann['category'].replace(' ', '').lower() in exclude:
+                    delete_marker = True
+                    break
+                elif ann['category'].replace(' ', '').lower() not in self.category_names:
+                    ann_deletions.append(ann)
+
+            if delete_marker:
+                # Remove images
+                deletions.append(fname)
+
+
+        # Prune Images
+        for fname in deletions:
+            merging_set._images.pop(fname)
+            merging_set._annotations.pop(fname)
+
+        # Prune annotations
+        if reject_new_categories:
+            for fname in merging_set._images.keys():
+                for ann in ann_deletions:
+                    if merging_set._annotations.get(fname, None) and ann in merging_set._annotations[fname]:
+                        merging_set._annotations[fname].remove(ann)
+                    if merging_set._images.get(fname, None) and ann in merging_set._images[fname]['labels']:
+                        merging_set._images[fname]['labels'].remove(ann)
+
+
+        # Merge Dataset
+        for img_key in merging_set._images.keys():
+            self._images[img_key] = merging_set._images[img_key]
+            self._annotations[img_key] = merging_set._annotations[img_key]
+
+        if len( merging_set._images) > 0:
+            merge_len = len(merging_set._images)
+            merge_ann_len = 0
+            for x in merging_set._annotations.keys():
+                merge_ann_len+=len(merging_set._annotations[x])
+
+            print('Successfully merged', merge_len, 'images | and ', merge_ann_len, 'annotations')
         else:
+            print('No images left to merge')
 
-        pass
+
+        self.export(format = Format.scalabel)
+        self.show_data_distribution()
+
+        # Save object to picklefile
+        pickle_dict = {'images':self._images,'annotations':self._annotations}
+        print('Saving to Pickle File:', self._pickle_file)
+        with open(self._pickle_file,"wb") as pickle_out:
+            pickle.dump(pickle_dict, pickle_out)
+
+
+
+    def show_data_distribution(self):
+
+        self.export(format = Format.coco, force = True)
+        dataset = {}
+        cat_ids = self.coco.getCatIds(catNms=list(self.category_names))
+
+        print('########## DATASET DISTRIBUTION: ############\n')
+        for cat_id in cat_ids:
+            annotation_ids = self.coco.getAnnIds(catIds=[cat_id])
+            image_ids = self.coco.getImgIds(catIds=[cat_id])
+            cat_nm = self.coco.loadCats(ids=[cat_id])[0]['name']
+            dataset[cat_id] = (len(annotation_ids), len(image_ids))
+            print(cat_nm.upper(), '| Annotations:', dataset[cat_id][0], ' | Images: ',  dataset[cat_id][1])
+        print('\n'+'#'*47+'\n')
 
 
     def maybe_download(self, source_uri, destination):
@@ -409,7 +507,8 @@ class DataFormatter(object):
 
     def load_training_img_uri(self, fname):
         if urllib.parse.urlparse(fname).scheme != "" or os.path.isabs(fname):
-            fname = os.path.split(fname)[-1]
+            fname = os.path.join(BDD100K_DIRECTORY, 'images/100k/train', os.path.split(fname)[-1])
+            img_key = self.trainer_prefix+self.path_leaf(fname)
         elif not os.path.isabs(fname):
             if self.input_format == Format.bdd:
                 # source_dir = bdd100k/train
@@ -453,6 +552,18 @@ class DataFormatter(object):
         with open(self.names_config, 'w+') as writer:
             for category in sorted(set(self.category_names)):
                 writer.write(category+'\n')
+
+    def generate_names_yml(self):
+        anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
+        cats = [[label['category'] for label in labels] for labels in anns]
+        categories = []
+        [categories.extend(cat) for cat in cats]
+        self.category_names = sorted(set(categories))
+
+        self.names_config = os.path.join(self.config_dir, self.trainer_prefix+'_names.yml')
+        with open(self.names_config, 'w+') as writer:
+            for category in sorted(set(self.category_names)):
+                writer.write('- name: '+category+'\n')
 
     def path_leaf(self, path):
         if urllib.parse.urlparse(path).scheme != "" or os.path.isabs(path):
@@ -514,7 +625,6 @@ class DataFormatter(object):
         return anns, images
 
     def generate_coco_annotations(self):
-        cats2ids = {}
         anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
         cats = [[label['category'] for label in labels] for labels in anns]
         categories = []
@@ -532,7 +642,7 @@ class DataFormatter(object):
 
 
         coco_anns, coco_imgs = self.convert_anns_to_coco()
-        print('Length of Coco Annotations:', len(coco_anns))
+        print('Length of COCO Annotations:', len(coco_anns))
 
 
 
@@ -616,14 +726,15 @@ class DataFormatter(object):
             res = os.system(coco2yolo)
 
 
-    def export(self, format = Format.coco):
+    def export(self, format = Format.coco, force = False):
         if format == Format.coco:
-            if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file):
+            if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file) or force == True:
                 self.generate_coco_annotations()
                 self.generate_names_cfg()
+                self.coco = COCO(self.coco_annotations_file)
 
         elif format == Format.darknet:
-            if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file):
+            if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file) or force == True:
                 # Convert to COCO first, since Darknet expects it
                 self.export(format = Format.coco)
 
@@ -636,6 +747,10 @@ class DataFormatter(object):
         elif format == Format.scalabel or format == Format.bdd:
             os.makedirs(os.path.join(self.output_path, 'bdd100k', 'annotations'), 0o755 , exist_ok = True )
             self.bdd100k_annotations = os.path.join(self.output_path, 'bdd100k', 'annotations/bdd100k_altered_annotations.json')
+            self.generate_names_yml()
+
+
+            os.remove(self.bdd100k_annotations)
             with open(self.bdd100k_annotations, "w+") as output_json_file:
                 imgs_list = list(self._images.values())
                 json.dump(imgs_list, output_json_file)
