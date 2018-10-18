@@ -486,21 +486,19 @@ class DataFormatter(object):
             cat_nm = self.coco.loadCats(ids=[cat_id])[0]['name']
             dataset[cat_id] = (len(annotation_ids), len(image_ids))
             print(cat_nm.upper(), '| Annotations:', dataset[cat_id][0], ' | Images: ',  dataset[cat_id][1])
-        print('\n'+'#'*47+'\n')
+        print('\n'+'#'*48+'\n')
 
 
     def maybe_download(self, source_uri, destination):
         if not os.path.exists(destination):
             if os.path.exists(source_uri):
-                #print('Copying file', source_uri, 'to file:', destination)
                 os.makedirs(os.path.split(destination)[0], exist_ok = True)
                 shutil.copyfile(source_uri, destination)
             elif urllib.parse.urlparse(source_uri).scheme != "":
                 destination, _ = urllib.request.urlretrieve(source_uri, destination)
                 statinfo = os.stat(destination)
             elif self.s3_bucket:
-
-                destination = self.download_from_s3(self.send_to_s3(destination))
+                destination = self.download_from_s3(destination)
             else:
                 print('Could not copy file', source_uri, 'to file:', destination, '. Does not exist')
 
