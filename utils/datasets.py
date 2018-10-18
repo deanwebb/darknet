@@ -554,7 +554,7 @@ class DataFormatter(object):
             uri = img_path
 
         s3uri = self.send_to_s3(uri)
-        res = subprocess.Popen(["curl -o {} {}".format(img_path, s3uri]))
+        res = os.system("curl -o {} {}".format(img_path, s3uri))
         return img_path
 
     def generate_names_cfg(self):
