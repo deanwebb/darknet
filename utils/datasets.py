@@ -498,7 +498,9 @@ class DataFormatter(object):
                 destination, _ = urllib.request.urlretrieve(source_uri, destination)
                 statinfo = os.stat(destination)
             elif self.s3_bucket:
-                destination = self.download_from_s3(destination)
+                print('SOURCE: ', self.send_to_s3(source_uri))
+                print('DEST: ', destination)
+                destination, _ = urllib.request.urlretrieve(self.send_to_s3(source_uri), destination)
             else:
                 print('Could not copy file', source_uri, 'to file:', destination, '. Does not exist')
 
@@ -508,13 +510,15 @@ class DataFormatter(object):
 
     def load_training_img_uri(self, fname):
         if urllib.parse.urlparse(fname).scheme != "" or os.path.isabs(fname):
-            fname = os.path.join(BDD100K_DIRECTORY, 'images/100k/train', os.path.split(fname)[-1])
-            img_key = self.trainer_prefix+self.path_leaf(fname)
+            fname = os.path.join(BDD100K_DIRECTORY, 'images/100k/train', self.path_leaf(fname))
+            if self.trainer_prefix not in self.path_leaf(fname):
+                img_key = self.trainer_prefix+self.path_leaf(fname)
         elif not os.path.isabs(fname):
             if self.input_format == Format.bdd:
                 # source_dir = bdd100k/train
                 fname = os.path.join(BDD100K_DIRECTORY, 'images/100k/train', fname)
-                img_key = self.trainer_prefix+self.path_leaf(fname)
+                if self.trainer_prefix not in self.path_leaf(fname):
+                    img_key = self.trainer_prefix+self.path_leaf(fname)
             elif self.input_format == Format.coco:
                 # source_dir = coco/train
                 SOURCE_COCO_DIRECTORY =  os.path.join('/media/dean/datastore1/datasets/road_coco/darknet/data/coco/images', self.trainer_prefix.split('_')[1])
@@ -552,7 +556,6 @@ class DataFormatter(object):
             uri = img_path.replace(self.trainer_prefix,'')
         else:
             uri = img_path
-
         s3uri = self.send_to_s3(uri)
         res = os.system("curl -o {} {}".format(img_path, s3uri))
         return img_path
