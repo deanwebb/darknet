@@ -511,13 +511,15 @@ class DataFormatter(object):
     def load_training_img_uri(self, fname):
         if urllib.parse.urlparse(fname).scheme != "" or os.path.isabs(fname):
             fname = os.path.join(BDD100K_DIRECTORY, 'images/100k/train', self.path_leaf(fname))
-            if self.trainer_prefix not in self.path_leaf(fname):
+            img_key = self.path_leaf(fname)
+            if self.trainer_prefix not in img_key:
                 img_key = self.trainer_prefix+self.path_leaf(fname)
         elif not os.path.isabs(fname):
             if self.input_format == Format.bdd:
                 # source_dir = bdd100k/train
                 fname = os.path.join(BDD100K_DIRECTORY, 'images/100k/train', fname)
-                if self.trainer_prefix not in self.path_leaf(fname):
+                img_key = self.path_leaf(fname)
+                if self.trainer_prefix not in img_key:
                     img_key = self.trainer_prefix+self.path_leaf(fname)
             elif self.input_format == Format.coco:
                 # source_dir = coco/train
