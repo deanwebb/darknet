@@ -548,7 +548,12 @@ class DataFormatter(object):
         return os.path.join('https://s3-us-west-2.amazonaws.com', s3_path)
 
     def download_from_s3(self, img_path):
-        s3uri = self.send_to_s3(img_path)
+        if self.input_format == Format.bdd:
+            uri = img_path.replace(self.trainer_prefix,'')
+        else:
+            uri = img_path
+    
+        s3uri = self.send_to_s3(uri)
         res = subprocess.call("wget -P {} {}".format(img_path, s3uri))
         return img_path
 
