@@ -89,7 +89,7 @@ class Darkernet():
                                                     output_path = os.path.join(self.current_training_dir, 'data'),
                                                     trainer_prefix = 'COCO_train2014_0000', s3_bucket = self.s3_bucket)
             # Export to Darknet format for training
-            self.dataset.export(datasets.Format.darknet)
+            self.dataset.export(datasets.Format.darknet, force = True)
 
             # Grab hyperparameters from filename
             tokens = trainer.split('_')
