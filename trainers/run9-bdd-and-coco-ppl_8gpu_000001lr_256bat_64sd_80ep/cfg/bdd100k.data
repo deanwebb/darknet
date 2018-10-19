@@ -1,0 +1,7 @@
+gpus=0
+classes=10
+valid=/media/dean/datastore1/datasets/darknet/trainers/run9-bdd-and-coco-ppl_8gpu_000001lr_256bat_64sd_80ep/data/coco/labels/val2014/manifast.txt
+names=/media/dean/datastore1/datasets/darknet/trainers/run9-bdd-and-coco-ppl_8gpu_000001lr_256bat_64sd_80ep/cfg/COCO_val2014_0000.names
+backup=/media/dean/datastore1/datasets/darknet/trainers/run9-bdd-and-coco-ppl_8gpu_000001lr_256bat_64sd_80ep/backup
+eval=coco
+train=/media/dean/datastore1/datasets/darknet/trainers/run9-bdd-and-coco-ppl_8gpu_000001lr_256bat_64sd_80ep/data/coco/labels/val2014/manifast.txt
