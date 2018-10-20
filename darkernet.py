@@ -81,7 +81,9 @@ class Darkernet():
                 self.input_format = datasets.Format.kache
 
         self.train_metrics = OrderedDict()
-        self.valid_metrics = OrderedDict()
+        self.evaluation_metrics = OrderedDict()
+        self.bdd_validation_set = None
+
 
         # For Run in Training Runs
         self.all_training_runs = []
@@ -121,6 +123,8 @@ class Darkernet():
 
             # Run Training #
             self.optimize()
+            # Run mAP #
+            self.evaluate(evaluate_all = True)
 
     def parse_model_config(self, path):
         """Parses the yolo-v3 layer configuration file and returns module definitions"""
@@ -163,8 +167,8 @@ class Darkernet():
         return path
 
     def generate_anchors(self, clusters = 9, width = 416, height = 416):
-        gen_anchors_cmd = "cd {} && cd ../.. && ./darknet detector calc_anchors {} \
-        -num_of_clusters {} -width {} -height {}".format(self.current_training_dir, self.current_data_cfg_path, clusters, width, height)
+        gen_anchors_cmd = "cd {} && ./darknet detector calc_anchors {} \
+        -num_of_clusters {} -width {} -height {}".format(self.current_working_dir, self.current_data_cfg_path, clusters, width, height)
         print('Calculating Anchors from dataset distribution...')
         os.system(gen_anchors_cmd)
         with open(self.anchors_path) as f:
@@ -172,10 +176,12 @@ class Darkernet():
 
 
     def inject_model_config(self, model_config, hyperparams, validation = False):
-        darknet_dir = os.path.abspath(os.path.join(self.current_training_dir, os.pardir, os.pardir))
-        self.anchors_path = os.path.join(darknet_dir, 'anchors.txt')
+        self.anchors_path = os.path.join(self.current_working_dir, 'anchors.txt')
         if not os.path.exists(self.anchors_path):
             self.generate_anchors()
+        else:
+            with open(self.anchors_path) as f:
+                self.anchors = f.readlines()[0].strip('\'')
 
         for i, block in enumerate(model_config):
             if block['type'] == 'net':
@@ -246,17 +252,22 @@ class Darkernet():
                                     output_path = os.path.join(self.current_training_dir, 'data', 'val'),
                                     trainer_prefix = 'COCO_val2014_0000',
                                     s3_bucket = 'kache-scalabel/bdd100k/images/100k/val/')
+        val.export(datasets.Format.darknet, force = True)
         return val
 
     def get_latest_weights(self):
         """Grab iterations and sort checkpoints"""
         d = {}
         weights_files = glob.glob(os.path.join(self.current_training_dir, 'backup/', '*.weights'))
+        init_weight = glob.glob(os.path.join(self.current_training_dir, 'backup/', '*.74'))
+        weights_files.extend(init_weight)
 
         for fpath in weights_files:
             fname = self.dataset.path_leaf(fpath)
             iterations = fname.split('_')[-1].split('.weights')[0]
-            if iterations != 'final':
+            if iterations == 'darknet53.conv.74':
+                d[fname] = 0
+            elif iterations != 'final':
                 d[fname] = int(iterations)
             else:
                 d[fname] = 1e5
@@ -269,25 +280,81 @@ class Darkernet():
 
     def evaluate(self, evaluate_all = False):
         """ Generates a validation set in BDD format and then Runs mAP against backup_dir"""
-
+        self.current_train_metrics = OrderedDict()
         if not self.bdd_validation_set:
             self.bdd_validation_set = self.generate_validation_set()
         try:
+            bdd_weights = [self.get_latest_weights()]
+            if evaluate_all:
+                bdd_weights = list(self.sorted_weights.keys())
 
-            self.current_train_metrics['iterations'] = self.sorted_weights[self.dataset.path_leaf(self.current_weights)]
-            self.current_train_metrics['map_results_file'] = self.current_weights+'.txt'
-            map_results_file = self.current_train_metrics['map_results_file']
-            self.current_train_metrics['map_results_file'] = self.current_train_metrics['map_results_file'] +'.backup'
-            if not os.path.exists(self.current_train_metrics['map_results_file']):
-                pass
+            for weights in bdd_weights:
+                self.current_train_metrics['iterations']    = self.sorted_weights[self.dataset.path_leaf(weights)]
+                self.current_train_metrics['map_results_file'] = weights+'.txt'
+                map_results_file = self.current_train_metrics['map_results_file']
+                self.current_map_results = self.current_train_metrics['map_results_file'] +'.backup'
+                if not os.path.exists(self.current_map_results):
+                    self.darknet_map_cmd = "cd {} && ./darknet detector map {} {} {} | tee -a {}".format(self.current_working_dir,
+                                                self.current_data_cfg_path, self.current_model_cfg_path, weights, map_results_file)
+                    print('Initializing Evaluation with the following parameters:','\n', self.darknet_map_cmd)
+                    proc=Popen(self.darknet_map_cmd, shell=True, stdout=PIPE)
+                    outfile = self.current_train_metrics['map_results_file']+'.backup'
+                    with open(outfile,"w+") as f:
+                        f.write(proc.communicate()[0].decode("utf-8"))
 
-
+                self.current_train_metrics['evaluation_results'] = self.collect_evaluation_metrics(weights)
 
             self.train_metrics[self.dataset.path_leaf(self.current_weights)] = self.current_train_metrics
         except KeyboardInterrupt:
             print("\nNow exiting evaluation... Results file: " + str(map_results_file) +
                   "\nCurrent weights: " + str(self.get_latest_weights()))
             f.close()
+
+    def collect_evaluation_metrics(self, weights):
+        """Parses the darknet mAP output and collects relevant metrics"""
+        #Get mAP results from file
+        class_stats = []
+        map_stats = {}
+        with open(self.current_map_results) as openfile:
+            for line in openfile:
+                for part in line.split():
+                    if 'class_id' in part:
+                        class_map = {}
+                        if 'class_id =' in line:
+                            id_tokens = line.split('class_id =')[1].split(',')
+                            if id_tokens[0] in [str(i) for i in range(10)]:
+                                class_map['class_id'] = int(id_tokens[0].strip())
+
+                        if 'name =' in line:
+                            name_tokens = line.split('name =')[1].split(',')
+                            class_map['class_name'] = name_tokens[0].strip()
+
+                        if 'ap =' in line:
+                            ap_tokens = line.split('ap =')[1].split(',')
+                            class_map['class_ap'] = ap_tokens[0].split('%')[0].strip()
+
+                        class_stats.append(class_map)
+                    elif '(mAP)' in part:
+                        tokens = line.split('(mAP) =')[1]
+                        map_stats['mean_avg_precision'] = tokens.split()[2].strip(',')
+                    elif 'Detection' in part:
+                        tokens = line.split(':')[1]
+                        total_detection_time = str(''.join(tokens)).strip()
+                        map_stats['total_detection_time'] = total_detection_time
+                    elif 'average IoU' and  'average IoU =' in line:
+                        tokens = line.split('average IoU =')[1].split(',')
+                        map_stats['avg_IoU'] = tokens[0].split('%')[0].strip()
+
+        map_stats['class_stats'] = class_stats
+        print(map_stats,'\n\n')
+        self.evaluation_metrics[weights] = map_stats
+
+
+        # Cache Data
+        pickle_file = os.path.join(self.current_training_dir,'evaluation_metrics.pickle')
+        pickle_dict = {'evaluation_metrics': self.evaluation_metrics}
+        with open(pickle_file,"wb") as pickle_out:
+            pickle.dump(pickle_dict, pickle_out)
 
 
     def optimize(self):
