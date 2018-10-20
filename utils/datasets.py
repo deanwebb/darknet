@@ -479,7 +479,7 @@ class DataFormatter(object):
         dataset = {}
         cat_ids = self.coco.getCatIds(catNms=list(self.category_names))
 
-        print('\n########## DATASET DISTRIBUTION: ############\n')
+        print('\n'+'#'*11+'DATASET DISTRIBUTION: '+'#'*11+'\n')
         for cat_id in cat_ids:
             annotation_ids = self.coco.getAnnIds(catIds=[cat_id])
             image_ids = self.coco.getImgIds(catIds=[cat_id])
@@ -732,7 +732,6 @@ class DataFormatter(object):
     def convert_coco_to_yolo(self):
         darknet_conversion_results = os.path.join(self.coco_labels_dir,'convert2yolo_results.txt')
         par_path = os.path.abspath(os.path.join(self.output_path, os.pardir, os.pardir, os.pardir))
-        print(self.path_leaf(os.getcwd()).strip('/'))
         if 'darknet' in os.path.abspath(os.getcwd()).strip('/'):
             yolo_converter = os.path.join(os.path.abspath(par_path), 'convert2Yolo/example.py')
         else:
