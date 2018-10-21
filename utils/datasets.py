@@ -49,6 +49,7 @@ BASE_DIR = '/media/dean/datastore1/datasets/BerkeleyDeepDrive/'
 BDD100K_DIRECTORY = os.path.join(BASE_DIR, 'bdd100k')
 DEFAULT_IMG_EXTENSION = '.jpg'
 EXCLUDE_CATS = ['lane', 'drivable area']
+COCO_BASE = '/media/dean/datastore1/datasets/road_coco/darknet/data/coco/'
 
 class DataFormatter(object):
     def __init__(self, annotations_list, s3_bucket = None, check_s3 = False,
@@ -479,7 +480,7 @@ class DataFormatter(object):
         dataset = {}
         cat_ids = self.coco.getCatIds(catNms=list(self.category_names))
 
-        print('\n'+'#'*11+'DATASET DISTRIBUTION: '+'#'*11+'\n')
+        print('\n'+'#'*11+' DATASET DISTRIBUTION: '+'#'*11+'\n')
         for cat_id in cat_ids:
             annotation_ids = self.coco.getAnnIds(catIds=[cat_id])
             image_ids = self.coco.getImgIds(catIds=[cat_id])
@@ -495,8 +496,8 @@ class DataFormatter(object):
                 os.makedirs(os.path.split(destination)[0], exist_ok = True)
                 shutil.copyfile(source_uri, destination)
             # Try checking coco path for image (since they are mixed)
-            elif os.path.exists(os.path.join(os.getcwd(), 'data/coco/images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))):
-                    source_uri = os.path.join(os.getcwd(), 'data/coco/images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
+            elif os.path.exists(os.path.join(COCO_BASE, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))):
+                    source_uri = os.path.join(COCO_BASE, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
                     os.makedirs(os.path.split(destination)[0], exist_ok = True)
                     shutil.copyfile(source_uri, destination)
             elif urllib.parse.urlparse(source_uri).scheme != "":
@@ -732,8 +733,11 @@ class DataFormatter(object):
     def convert_coco_to_yolo(self):
         darknet_conversion_results = os.path.join(self.coco_labels_dir,'convert2yolo_results.txt')
         par_path = os.path.abspath(os.path.join(self.output_path, os.pardir, os.pardir, os.pardir))
+        val_par_path = os.path.abspath(os.path.join(par_path, os.pardir))
         if 'darknet' in os.path.abspath(os.getcwd()).strip('/'):
             yolo_converter = os.path.join(os.path.abspath(par_path), 'convert2Yolo/example.py')
+        elif 'darknet' in os.path.abspath(os.path.join(self.current_working_dir, os.pardir, os.pardir, os.pardir, os.pardir)).strip('/'):
+            yolo_converter = os.path.join(os.path.abspath(val_par_path),'darknet', 'convert2Yolo/example.py')
         else:
             yolo_converter = os.path.join(os.path.abspath(par_path),'darknet', 'convert2Yolo/example.py')
 
