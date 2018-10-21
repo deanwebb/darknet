@@ -34,10 +34,12 @@ BDD100K_DIR = os.path.join('/media/dean/datastore1/datasets/BerkeleyDeepDrive', 
 WORKING_DIR = os.getcwd()
 TRAINERS_DIR = os.path.join(WORKING_DIR, 'trainers')
 ANNOTATIONS_LIST = os.path.join(BDD100K_DIR, 'labels/bdd100k_labels_images_train.json')
+VAL_ANNOTATIONS_LIST = os.path.join(BDD100K_DIR, 'labels/bdd100k_labels_images_val.json')
+
 COCO_ANNOTATIONS_LIST = os.path.join('/media/dean/datastore1/datasets/road_coco/darknet/data/coco/annotations/instances_train2014.json')
 BASE_DATA_CONFIG = os.path.join(WORKING_DIR, 'cfg', 'bdd100k.data')
 BASE_MODEL_CONFIG = os.path.join(WORKING_DIR, 'cfg', 'yolov3-bdd100k.cfg')
-S3_BUCKET = 'kache-scalabel/bdd100k/images/100k/val/'
+S3_BUCKET = 'kache-scalabel/bdd100k/images/100k/train/'
 
 
 class Darkernet():
@@ -94,7 +96,7 @@ class Darkernet():
             ## Prepare Dataset ##
             self.dataset = datasets.DataFormatter(annotations_list = self.annotations_list, input_format =self.input_format,
                                                     output_path = os.path.join(self.current_training_dir, 'data'),
-                                                    trainer_prefix = 'COCO_val2014_0000', s3_bucket = self.s3_bucket)
+                                                    trainer_prefix = 'COCO_train2014_0000', s3_bucket = self.s3_bucket)
             # Export to Darknet format for training
             self.dataset.export(datasets.Format.darknet, force = True)
 
@@ -247,7 +249,7 @@ class Darkernet():
         return options
 
     def generate_validation_set(self):
-        val = datasets.DataFormatter(annotations_list = self.annotations_list.replace('train', 'val'),
+        val = datasets.DataFormatter(annotations_list = VAL_ANNOTATIONS_LIST,
                                     input_format = datasets.Format.bdd,
                                     output_path = os.path.join(self.current_training_dir, 'data', 'val'),
                                     trainer_prefix = 'COCO_val2014_0000',
