@@ -309,7 +309,7 @@ class Darkernet():
 
             for weights in bdd_weights:
                 self.current_train_metrics['iterations']    = self.sorted_weights[self.dataset.path_leaf(weights)]
-                self.current_train_metrics['map_results_file'] = weights+'.txt'
+                self.current_train_metrics['map_results_file'] = os.path.join(self.current_weights_dir, weights+'.txt')
                 map_results_file = self.current_train_metrics['map_results_file']
                 self.current_map_results = self.current_train_metrics['map_results_file'] +'.backup'
                 if not os.path.exists(self.current_map_results):
