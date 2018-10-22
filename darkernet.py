@@ -109,19 +109,36 @@ class Darkernet():
                            'subdivisions': int(tokens[4].replace('sd','')),
                            'epochs': int(tokens[5].replace('ep',''))}
 
+            if not self.bdd_validation_set:
+                self.bdd_validation_set = self.generate_validation_set()
+
+
             print('Initiating Trainer:', self.current_training_dir,'\n\n','Hyperameters:', hyperparams)
 
             # Override data config
             self.current_data_cfg = self.parse_data_config(self.data_cfg)
             os.makedirs(os.path.join(self.current_training_dir, 'data'), exist_ok = True)
+            os.makedirs(os.path.join(self.current_training_dir, 'data/val'), exist_ok = True)
+            os.makedirs(os.path.join(self.current_training_dir, 'cfg'), exist_ok = True)
+            os.makedirs(os.path.join(self.current_training_dir, 'data/val/cfg'), exist_ok = True)
+
+
             self.current_data_cfg = self.inject_data_config(self.current_data_cfg)
             self.current_data_cfg_path = self.save_data_config(self.current_data_cfg, os.path.join(self.current_training_dir, 'cfg', os.path.split(self.data_cfg)[-1]))
+
+            # Validation configs #
+            self.current_val_data_cfg = self.inject_data_config(self.current_data_cfg, validation = True)
+            self.current_val_data_cfg_path = self.save_data_config(self.current_val_data_cfg, os.path.join(self.current_training_dir,'data/val','cfg', os.path.split(self.data_cfg)[-1]))
 
             # Override model config
             self.current_model_cfg = self.parse_model_config(self.model_cfg)
             self.current_model_cfg = self.inject_model_config(self.current_model_cfg, hyperparams)
-            os.makedirs(os.path.join(self.current_training_dir, 'cfg'), exist_ok = True)
             self.current_model_cfg_path = self.save_model_config(self.current_model_cfg, os.path.join(self.current_training_dir, 'cfg', os.path.split(self.model_cfg)[-1]))
+
+            # Validation configs #
+            self.current_val_model_cfg = self.inject_model_config(self.current_model_cfg, hyperparams, validation = True)
+            self.current_val_model_cfg_path = self.save_model_config(self.current_val_model_cfg, os.path.join(self.current_training_dir, 'data/val', 'cfg', os.path.split(self.model_cfg)[-1]))
+
 
             # Run Training #
             self.optimize()
@@ -191,16 +208,16 @@ class Darkernet():
                 block['batch'] = hyperparams['batch']
                 block['subdivisions'] = hyperparams['subdivisions']
                 if validation:
-                    block['burn_in'] = len(self.validation_set._images.items())//(hyperparams['gpus'] * hyperparams['batch'])
-                    block['max_batches'] = len(self.self.validation_set._images.items())//(hyperparams['gpus'] * hyperparams['batch']) * hyperparams['epochs']
+                    block['burn_in'] = len(self.bdd_validation_set._images.items())//(hyperparams['gpus'] * hyperparams['batch'])
+                    block['max_batches'] = len(self.bdd_validation_set._images.items())//(hyperparams['gpus'] * hyperparams['batch']) * hyperparams['epochs']
                 else:
                     block['burn_in'] = len(self.dataset._images.items())//(hyperparams['gpus'] * hyperparams['batch'])
                     block['max_batches'] = len(self.dataset._images.items())//(hyperparams['gpus'] * hyperparams['batch']) * hyperparams['epochs']
             elif block['type'] == 'yolo':
                 if validation:
-                    block['classes'] = len(self.validation_set.category_names)
+                    block['classes'] = len(self.bdd_validation_set.category_names)
                     block['anchors'] = self.anchors
-                    model_config[i-1]['filters'] = (len(self.validation_set.category_names)+5)*3
+                    model_config[i-1]['filters'] = (len(self.bdd_validation_set.category_names)+5)*3
                 else:
                     block['classes'] = len(self.dataset.category_names)
                     block['anchors'] = self.anchors
@@ -210,14 +227,14 @@ class Darkernet():
 
     def inject_data_config(self, data_config, validation = False):
         if validation:
-            data_config['train'] = self.validation_set.darknet_manifast
-            data_config['classes'] = len(self.validation_set.category_names)
-            data_config['valid'] = self.validation_set.darknet_manifast
-            data_config['names'] = self.validation_set.names_config
-            backup_path = os.path.abspath(os.path.join(self.validation_set.output_path, os.pardir, 'backup'))
+            data_config['train'] = self.bdd_validation_set.darknet_manifast
+            data_config['classes'] = len(self.bdd_validation_set.category_names)
+            data_config['valid'] = self.bdd_validation_set.darknet_manifast
+            data_config['names'] = self.bdd_validation_set.names_config
+            backup_path = os.path.abspath(os.path.join(self.bdd_validation_set.output_path, os.pardir, 'backup'))
             os.makedirs(backup_path, exist_ok = True)
-            data_config['backup'] = os.path.abspath(os.path.join(self.validation_set.output_path, os.pardir, 'backup'))
-            num_gpus = int(self.validation_set.parse_nvidia_smi()['Attached GPUs'])
+            data_config['backup'] = os.path.abspath(os.path.join(self.bdd_validation_set.output_path, os.pardir, 'backup'))
+            num_gpus = int(self.bdd_validation_set.parse_nvidia_smi()['Attached GPUs'])
             data_config['gpus'] = ','.join(str(i) for i in range(num_gpus))
         else:
             data_config['train'] = self.dataset.darknet_manifast
@@ -297,7 +314,7 @@ class Darkernet():
                 self.current_map_results = self.current_train_metrics['map_results_file'] +'.backup'
                 if not os.path.exists(self.current_map_results):
                     self.darknet_map_cmd = "cd {} && ./darknet detector map {} {} {} | tee -a {}".format(self.current_working_dir,
-                                                self.current_data_cfg_path, self.current_model_cfg_path, os.path.join(self.current_weights_dir, weights), map_results_file)
+                                                self.current_val_data_cfg_path, self.current_val_model_cfg_path, os.path.join(self.current_weights_dir, weights), map_results_file)
                     print('Initializing Evaluation with the following parameters:','\n', self.darknet_map_cmd)
                     proc=Popen(self.darknet_map_cmd, shell=True, stdout=PIPE)
                     outfile = self.current_train_metrics['map_results_file']+'.backup'
