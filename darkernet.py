@@ -297,7 +297,7 @@ class Darkernet():
                 self.current_map_results = self.current_train_metrics['map_results_file'] +'.backup'
                 if not os.path.exists(self.current_map_results):
                     self.darknet_map_cmd = "cd {} && ./darknet detector map {} {} {} | tee -a {}".format(self.current_working_dir,
-                                                self.current_data_cfg_path, self.current_model_cfg_path, weights, map_results_file)
+                                                self.current_data_cfg_path, self.current_model_cfg_path, os.path.join(self.current_weights_dir, weights), map_results_file)
                     print('Initializing Evaluation with the following parameters:','\n', self.darknet_map_cmd)
                     proc=Popen(self.darknet_map_cmd, shell=True, stdout=PIPE)
                     outfile = self.current_train_metrics['map_results_file']+'.backup'
