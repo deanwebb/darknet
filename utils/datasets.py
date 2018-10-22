@@ -65,9 +65,17 @@ class DataFormatter(object):
         self.trainer_prefix = trainer_prefix
         os.makedirs(os.path.join(self.output_path, 'coco'), 0o755 , exist_ok = True )
         self.coco_directory = os.path.join(self.output_path, 'coco')
-        self.coco_images_dir = os.path.join(self.coco_directory, 'images', self.trainer_prefix.split('_')[1])
+        self.coco_images_dir = os.path.join(self.coco_directory, 'images', self.trainer_prefix.split('_')[1]+'/')
+        self.coco_labels_dir = os.path.join(self.coco_directory, 'labels', self.trainer_prefix.split('_')[1]+'/')
+        os.makedirs(self.coco_labels_dir, exist_ok = True)
+        os.makedirs(self.coco_images_dir, exist_ok = True)
         self.coco_annotations_file = coco_annotations_file
-        self.darknet_manifast = darknet_manifast
+
+        if darknet_manifast and os.path.exists(darknet_manifast):
+            self.darknet_manifast = darknet_manifast
+        else:
+            self.darknet_manifast = os.path.join(self.coco_labels_dir, 'manifast.txt')
+
         self.config_dir = os.path.join(os.path.split(self.output_path)[0], 'cfg')
         os.makedirs(self.config_dir, exist_ok = True)
 
@@ -734,10 +742,11 @@ class DataFormatter(object):
         darknet_conversion_results = os.path.join(self.coco_labels_dir,'convert2yolo_results.txt')
         par_path = os.path.abspath(os.path.join(self.output_path, os.pardir, os.pardir, os.pardir))
         val_par_path = os.path.abspath(os.path.join(par_path, os.pardir))
-        if 'darknet' in os.path.abspath(os.getcwd()).strip('/'):
+
+        if 'darknet' in os.path.split(os.path.abspath(self.output_path))[1].strip('/'):
             yolo_converter = os.path.join(os.path.abspath(par_path), 'convert2Yolo/example.py')
-        elif 'darknet' in os.path.abspath(os.path.join(self.current_working_dir, os.pardir, os.pardir, os.pardir, os.pardir)).strip('/'):
-            yolo_converter = os.path.join(os.path.abspath(val_par_path),'darknet', 'convert2Yolo/example.py')
+        elif 'darknet' in os.path.split(os.path.abspath(os.path.join(self.output_path, os.pardir, os.pardir, os.pardir, os.pardir)))[1].strip('/'):
+            yolo_converter = os.path.join(os.path.abspath(val_par_path), 'convert2Yolo/example.py')
         else:
             yolo_converter = os.path.join(os.path.abspath(par_path),'darknet', 'convert2Yolo/example.py')
 
@@ -748,8 +757,8 @@ class DataFormatter(object):
                                 self.coco_labels_dir, DEFAULT_IMG_EXTENSION, os.path.split(self.darknet_manifast)[0], self.names_config,
                                 darknet_conversion_results)
 
-            print('Converting annotations into Darknet format. Directory:',self.coco_labels_dir)
-            print('Coco to Yolo command:', coco2yolo)
+            print('\nConverting annotations into Darknet format. Directory:',self.coco_labels_dir)
+            print('\nCoco to Yolo command:', coco2yolo)
             res = os.system(coco2yolo)
 
 
@@ -763,12 +772,15 @@ class DataFormatter(object):
         elif format == Format.darknet:
             if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file) or force == True:
                 # Convert to COCO first, since Darknet expects it
-                self.export(format = Format.coco)
+                self.export(format = Format.coco, force = force)
 
-                if not self.darknet_manifast or not os.path.exists(self.darknet_manifast):
-                    self.coco_labels_dir = os.path.join(self.coco_directory, 'labels', self.trainer_prefix.split('_')[1]+'/')
-                    os.makedirs(self.coco_labels_dir, exist_ok = True)
-                    self.darknet_manifast = os.path.join(self.coco_labels_dir, 'manifast.txt')
+                if not self.darknet_manifast or not os.path.exists(self.darknet_manifast)  or force == True:
+                    if not self.coco_labels_dir or not os.path.exists(self.coco_labels_dir):
+                        self.coco_labels_dir = os.path.join(self.coco_directory, 'labels', self.trainer_prefix.split('_')[1]+'/')
+                        os.makedirs(self.coco_labels_dir, exist_ok = True)
+
+                    if not self.darknet_manifast or not os.path.exists(self.darknet_manifast):
+                        self.darknet_manifast = os.path.join(self.coco_labels_dir, 'manifast.txt')
                     self.convert_coco_to_yolo()
 
         elif format == Format.scalabel or format == Format.bdd:
