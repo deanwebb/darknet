@@ -24,6 +24,7 @@ import shutil
 import pickle
 import pandas as pd
 import subprocess
+from subprocess import Popen,PIPE,STDOUT,call
 from datetime import datetime
 import urllib
 import subprocess
@@ -41,20 +42,18 @@ class Format(Enum):
     kache = 5
     open_imgs = 6
 
-##########  ############
-##      Refactor      ##
-##########  ############
-
-BASE_DIR = '/media/dean/datastore1/datasets/BerkeleyDeepDrive/'
-BDD100K_DIRECTORY = os.path.join(BASE_DIR, 'bdd100k')
 DEFAULT_IMG_EXTENSION = '.jpg'
 EXCLUDE_CATS = ['lane', 'drivable area']
-COCO_BASE = '/media/dean/datastore1/datasets/road_coco/darknet/data/coco/'
+BASE_DIR = '/media/dean/datastore/datasets/BerkeleyDeepDrive/'
+BDD100K_DIR = os.path.join(BASE_DIR, 'bdd100k')
+COCO_BASE = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
+SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames')
+
 
 class DataFormatter(object):
     def __init__(self, annotations_list, s3_bucket = None, check_s3 = False,
                     input_format=Format.scalabel, output_path=os.getcwd(), pickle_file = None,
-                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None):
+                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None, image_list = None):
 
         self.input_format = input_format
         self._images = {}
@@ -90,6 +89,33 @@ class DataFormatter(object):
             if self.input_format == Format.kache:
                 # Get images from image_list Directory
                 # Prepare Data using BDD100K to get list of images
+
+                if image_list:
+                    self.input_imgs_dir = image_list
+                else:
+                    self.input_imgs_dir = os.path.getdir(annotations_list)
+
+                imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
+
+                uris2paths = {}
+                uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
+                for idx, uri in uris:
+                    fname = self.path_leaf(uri)
+                    img_key, uris2paths[uri] = self.load_training_img_uri(uri)
+
+                    im = Image.open(uris2paths[uri])
+                    width, height = im.size
+                    if self.s3_bucket: s3uri = self.send_to_s3(uri)
+
+                    ## TODO: Build timestamp to timeofday function
+                    self._images[img_key] = {'url': s3uri, 'name': s3uri, 'coco_path': uris2paths[uri],
+                                                      'width': width, 'height': height, 'labels': [],
+                                                      'index': idx, 'timestamp': 10000,
+                                                      'videoName': '', # Rack1 Bag Uri
+                                                      'attributes': {'weather': None,
+                                                                     'scene': 'Highway',
+                                                                     'timeofday': None}}
+                    self._annotations[img_key] = []
                 # Run Darknet on Images to get list of annotations_list
                 # Combine image_list and annotations from Darknet and export to Scalabel Format
                 # Export to Darknet
@@ -228,7 +254,7 @@ class DataFormatter(object):
                             train_type = 'train'
                             if 'val' in self.trainer_prefix and 'train' not in self.trainer_prefix:
                                 train_type  = 'val'
-                            img_label_name = os.path.join(BDD100K_DIRECTORY, 'images/100k', train_type, img_label['name'])
+                            img_label_name = os.path.join(BDD100K_DIR, 'images/100k', train_type, img_label['name'])
 
                         img_key, img_uri = self.load_training_img_uri(img_label_name)
                         im = Image.open(img_uri)
@@ -528,27 +554,25 @@ class DataFormatter(object):
             train_type  = 'val'
 
         if urllib.parse.urlparse(fname).scheme != "" or os.path.isabs(fname):
-            fname = os.path.join(BDD100K_DIRECTORY, 'images/100k', train_type, fname)
-            img_key = self.path_leaf(fname)
-            if self.trainer_prefix not in img_key:
-                img_key = self.trainer_prefix+self.path_leaf(fname)
-        elif not os.path.isabs(fname):
+            fname = os.path.join(BDD100K_DIR, 'images/100k', train_type, fname)
+        else:
             if self.input_format == Format.bdd:
-                fname = os.path.join(BDD100K_DIRECTORY, 'images/100k', train_type, fname)
-                img_key = self.path_leaf(fname)
-                if self.trainer_prefix not in img_key:
-                    img_key = self.trainer_prefix+self.path_leaf(fname)
+                fname = os.path.join(BDD100K_DIR, 'images/100k', train_type, fname)
             elif self.input_format == Format.coco:
-                # source_dir = coco/train
-                SOURCE_COCO_DIRECTORY =  os.path.join('/media/dean/datastore1/datasets/road_coco/darknet/data/coco/images', self.trainer_prefix.split('_')[1])
-                fname = os.path.join(SOURCE_COCO_DIRECTORY, self.path_leaf(fname))
-                img_key = self.path_leaf(fname)
+                SOURCE_COCO_DIR =  os.path.join(COCO_BASE, 'images', self.trainer_prefix.split('_')[1])
+                fname = os.path.join(SOURCE_COCO_DIR, self.path_leaf(fname))
+            elif self.input_format == Format.kache:
+                fname = os.path.join(SOURCE_KACHE_DIR, self.path_leaf(fname))
 
-        ## Add to training_dir
+        if self.trainer_prefix not in self.path_leaf(fname):
+            img_key = self.trainer_prefix+self.path_leaf(fname)
+        else:
+            img_key = self.path_leaf(fname)
+
+        ## Add to coco_training_dir
         os.makedirs(os.path.join(self.coco_directory, 'images' , self.trainer_prefix.split('_')[1]), exist_ok = True)
         img_uri = self.maybe_download(fname,
                                     os.path.join(self.coco_directory, 'images' , self.trainer_prefix.split('_')[1], img_key))
-
         return img_key, img_uri
 
     def get_cache(self, pickle_file):
@@ -561,10 +585,12 @@ class DataFormatter(object):
         s3_path = os.path.join(self.s3_bucket,self.path_leaf(img_path))
 
         if self.check_s3:
-            exists = subprocess.call("aws s3 ls {}".format(s3_path))
-            if not exists:
-                s3_bucket = 's3://'+self.s3_bucket
-                res = subprocess.call("aws s3 cp {} {}".format(img_path, s3_bucket))
+            #exists = subprocess.check_output("aws s3 ls {}".format(s3_path), shell=True)
+            # if not exists:
+            s3_bucket = 's3://'+self.s3_bucket
+            sp = subprocess.Popen("aws s3 cp {} {}".format(img_path, s3_bucket), shell=True, stdout=PIPE)
+            out_str = sp.communicate()
+            print(out_str[0].decode("utf-8"))
         return os.path.join('https://s3-us-west-2.amazonaws.com', s3_path)
 
     def download_from_s3(self, img_path):
