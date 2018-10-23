@@ -87,39 +87,79 @@ class DataFormatter(object):
         else:
             ###------------------ Kache Logs Data Handler -----------------------###
             if self.input_format == Format.kache:
-                # Get images from image_list Directory
-                # Prepare Data using BDD100K to get list of images
-
-                if image_list:
-                    self.input_imgs_dir = image_list
+                # Get images from image_list Directory, check-if annotations_list is pickle file
+                if glob.glob(os.path.join(os.path.dirname(image_list), '*.pickle')):
+                    pickle_file = glob.glob(os.path.join(os.path.dirname(image_list), '*.pickle'))[0]
+                    pickle_in = open(pickle_file,"rb")
+                    pickle_dict = pickle.load(pickle_in)
+                    self.kache_ai_logs = pickle_dict['img_data']
+                    self.kache_ai_lookup_table = pickle_dict['lookup_table']
+                    self.input_imgs_dir = os.path.dirname(image_list)
+                elif glob.glob(os.path.join(os.path.dirname(annotations_list), '*.pickle')):
+                    pickle_file = glob.glob(os.path.join(os.path.dirname(annotations_list), '*.pickle'))[0]
+                    pickle_in = open(pickle_file,"rb")
+                    pickle_dict = pickle.load(pickle_in)
+                    self.kache_ai_logs = pickle_dict['img_data']
+                    self.kache_ai_lookup_table = pickle_dict['lookup_table']
+                    self.input_imgs_dir = os.path.dirname(annotations_list)
                 else:
-                    self.input_imgs_dir = os.path.getdir(annotations_list)
+                    self.input_imgs_dir = os.path.dirname(annotations_list)
 
                 imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
 
                 uris2paths = {}
                 uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
                 for idx, uri in uris:
+                    img_data = None
+                    for bag, frame in ((x1, x2) for x1 in self.kache_ai_logs for x2 in x1[1]['frames']):
+                        if frame['hash_key'] == self.path_leaf(uri).replace(DEFAULT_IMG_EXTENSION,''):
+                            img_data = frame
+                            break
+
                     fname = self.path_leaf(uri)
                     img_key, uris2paths[uri] = self.load_training_img_uri(uri)
+
+                    if img_data:
+                        time = img_data['time_readable'].split(' ')[3]
+                        hour = int(time.split(':')[0])
+                        if hour < 6 or (hour > 17 and hour < 19):
+                            timeofday = 'dawn/dusk'
+                        elif hour > 6 and hour < 17:
+                            timeofday = 'daytime'
+                        else:
+                            timeofday = 'night'
+
+                        vid_name = img_data['bag_name']
+                        scene = 'highway'
+                        timestamp = img_data['time_sec']
+                        dataset_path = img_data['dataset_path']
+                    else:
+                        vid_name = None
+                        timeofday = 'daytime'
+                        scene = 'highway'
+                        timestamp = 10000
+                        dataset_path = uris2paths[uri]
+
+
+
+
 
                     im = Image.open(uris2paths[uri])
                     width, height = im.size
                     if self.s3_bucket: s3uri = self.send_to_s3(uri)
 
                     ## TODO: Build timestamp to timeofday function
-                    self._images[img_key] = {'url': s3uri, 'name': s3uri, 'coco_path': uris2paths[uri],
+                    self._images[img_key] = {'url': s3uri, 'name': s3uri, 'coco_path': dataset_path,
                                                       'width': width, 'height': height, 'labels': [],
-                                                      'index': idx, 'timestamp': 10000,
-                                                      'videoName': '', # Rack1 Bag Uri
+                                                      'index': idx, 'timestamp': timestamp,
+                                                      'videoName': vid_name,
                                                       'attributes': {'weather': None,
-                                                                     'scene': 'Highway',
-                                                                     'timeofday': None}}
+                                                                     'scene': scene,
+                                                                     'timeofday': timeofday}}
                     self._annotations[img_key] = []
                 # Run Darknet on Images to get list of annotations_list
                 # Combine image_list and annotations from Darknet and export to Scalabel Format
                 # Export to Darknet
-                pass
 
 
             ###------------------ Scalabel Data Handler -----------------------###
