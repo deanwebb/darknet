@@ -33,13 +33,6 @@ import ntpath
 from utils import darknet_annotator
 from itertools import zip_longest
 
-class DataGrouper(object):
-    def __init__(iterable, n, fillvalue=None):
-        "Collect data into fixed-length chunks or blocks"
-        # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx
-        args = [iter(iterable)] * n
-        return izip_longest(fillvalue=fillvalue, *args)
-
 
 class Format(Enum):
     scalabel = 0
@@ -61,7 +54,7 @@ SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'fra
 class DataFormatter(object):
     def __init__(self, annotations_list, s3_bucket = None, check_s3 = False,
                     input_format=Format.scalabel, output_path=os.getcwd(), pickle_file = None,
-                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None, image_list = None):
+                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None, image_list = None, use_cache = False):
 
         self.input_format = input_format
         self._images = {}
@@ -90,7 +83,7 @@ class DataFormatter(object):
         path = os.path.normpath(annotations_list)
         self._pickle_file = "{}.pickle".format('_'.join(path.split(os.sep)[5:]))
 
-        if self._pickle_file and os.path.exists(self._pickle_file):
+        if self._pickle_file and os.path.exists(self._pickle_file) and use_cache:
             self._images, self._annotations = self.get_cache(self._pickle_file)
         else:
             ###------------------ Kache Logs Data Handler -----------------------###
@@ -111,84 +104,90 @@ class DataFormatter(object):
                     self.kache_ai_lookup_table = pickle_dict['lookup_table']
                     self.input_imgs_dir = os.path.dirname(annotations_list)
                 else:
-                    self.input_imgs_dir = os.path.dirname(annotations_list)
+                    self.input_imgs_dir = os.path.split(annotations_list)[0]
 
                 imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
-                ann_idx = 0
+
                 uris2paths = {}
                 uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
                 for idx, uri in uris:
-                    img_data = None
-                    for bag, frame in ((x1, x2) for x1 in self.kache_ai_logs for x2 in x1[1]['frames']):
-                        if frame['hash_key'] == self.path_leaf(uri).replace(DEFAULT_IMG_EXTENSION,''):
-                            img_data = frame
-                            break
+                    if os.path.isfile(uri) and DEFAULT_IMG_EXTENSION in str(uri):
 
-                    fname = self.path_leaf(uri)
-                    img_key, uris2paths[uri] = self.load_training_img_uri(uri)
+                        img_data = None
+                        for bag, frame in ((x1, x2) for x1 in self.kache_ai_logs for x2 in x1[1]['frames']):
+                            if frame['hash_key'] == self.path_leaf(uri).replace(DEFAULT_IMG_EXTENSION,''):
 
-                    if img_data:
-                        time = img_data['time_readable'].split(' ')[3]
-                        hour = int(time.split(':')[0])
-                        if (hour > 4 and hour < 6) or (hour > 17 and hour < 19):
-                            timeofday = 'dawn/dusk'
-                        elif hour > 6 and hour < 17:
-                            timeofday = 'daytime'
+                                img_data = frame
+                                break
+
+                        fname = self.path_leaf(uri)
+                        img_key, uris2paths[uri] = self.load_training_img_uri(uri)
+
+                        if img_data:
+                            #print('IMAGE_DATA FOUND')
+                            time = img_data['time_readable'].split(' ')[3]
+                            hour = int(time.split(':')[0])
+                            if (hour > 4 and hour < 6) or (hour > 17 and hour < 19):
+                                timeofday = 'dawn/dusk'
+                            elif hour > 6 and hour < 17:
+                                timeofday = 'daytime'
+                            else:
+                                timeofday = 'night'
+
+                            vid_name = img_data['bag_name']
+                            scene = 'highway'
+                            timestamp = img_data['time_sec']
+                            dataset_path = img_data['dataset_path']
                         else:
-                            timeofday = 'night'
-
-                        vid_name = img_data['bag_name']
-                        scene = 'highway'
-                        timestamp = img_data['time_sec']
-                        dataset_path = img_data['dataset_path']
-                    else:
-                        vid_name = None
-                        timeofday = 'daytime'
-                        scene = 'highway'
-                        timestamp = 10000
-                        dataset_path = uris2paths[uri]
+                            vid_name = None
+                            timeofday = 'daytime'
+                            scene = 'highway'
+                            timestamp = 10000
+                            dataset_path = uris2paths[uri]
 
 
-                    im = Image.open(uris2paths[uri])
-                    width, height = im.size
-                    if self.s3_bucket: s3uri = self.send_to_s3(uri)
+                        im = Image.open(uris2paths[uri])
+                        width, height = im.size
+                        if self.s3_bucket: s3uri = self.send_to_s3(uri)
 
-                    self._images[img_key] = {'url': s3uri, 'name': s3uri, 'coco_path': dataset_path,
-                                                      'width': width, 'height': height, 'labels': [],
-                                                      'index': idx, 'timestamp': timestamp,
-                                                      'videoName': vid_name,
-                                                      'attributes': {'weather': None,
-                                                                     'scene': scene,
-                                                                     'timeofday': timeofday}}
-                    self._annotations[img_key] = []
+                        self._images[img_key] = {'url': s3uri,
+                                                 'name': self.path_leaf(s3uri),
+                                                 'coco_path': dataset_path,
+                                                 'width': width,
+                                                 'height': height,
+                                                 'index': int(idx),
+                                                 'timestamp': int(timestamp),
+                                                 'videoName': vid_name,
+                                                 'attributes': {'weather': 'clear', 'scene': scene, 'timeofday': timeofday},
+                                                 'labels': []
+                                                }
+                        self._annotations[img_key] = []
+                    # Run Darknet on Images to get list of annotations_list
+                    # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
+                    # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights", 0)
+                    # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
+                    # annotate(image_dir, cfg_path, weights_path, data_cfg_pth)
 
-                    self.remove_none(self._images)
 
-
-                # Run Darknet on Images to get list of annotations_list
-                # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
-                # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights", 0)
-                # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
-                # annotate(image_dir, cfg_path, weights_path, data_cfg_pth)
-                anns = darknet_annotator.annotate(os.path.abspath(os.path.dirname(dataset_path)),
+                anns = darknet_annotator.annotate(os.path.abspath(self.input_imgs_dir),
                                             "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
                                             "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights",
                                             "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
 
 
+                ann_idx = 0
                 for uri, img_anns in anns:
-                    img_key = self.trainer_prefix+self.path_leaf(uri)
+                    img_key, uris2paths[uri] = self.load_training_img_uri(uri)
+                    print('IMAGE_ANN:', img_anns)
                     for ann in img_anns:
                         label = {}
                         label['id'] = int(ann_idx)
-                        label['attributes'] = ann.get('attributes', None)
-                        if ann.get('attributes', None):
-                            label['attributes'] = {'Occluded': ann['attributes'].get('occluded', False),
-                                                   'Truncated': ann['attributes'].get('truncated', False),
-                                                   'Traffic Light Color': [0, 'NA']}
+                        ann_idx +=1
+                        label['attributes'] = {'occluded': False,
+                                               'truncated': False,
+                                               'trafficLightColor': [0, 'NA']}
 
                         label['manual'] =  ann.get('manual', False)
-                        label['manualAttributes'] = ann.get('manualAttributes', False)
                         label['poly2d'] = ann.get('poly2d', None)
                         label['box3d'] = ann.get('box3d', None)
                         label['box2d'] = ann.get('box2d', None)
@@ -200,23 +199,16 @@ class DataFormatter(object):
                             assert (label['box2d']['y2'] == ann['box2d']['y2']), "Mismatch: {}--{}".format(label['box2d']['y2'], ann['box2d']['y2'])
 
                         label['category'] = ann['category']
-                        if label['category'] == 'traffic light':
-                            if ann['attributes'].get('trafficLightColor', None):
-                                if ann['attributes']['trafficLightColor'] == 'green':
-                                    label['attributes']['Traffic Light Color'] = [1, 'G']
-                                elif ann['attributes']['trafficLightColor'] == 'yellow':
-                                    label['attributes']['Traffic Light Color'] = [2, 'Y']
-                                elif ann['attributes']['trafficLightColor'] == 'red':
-                                    label['attributes']['Traffic Light Color'] = [3, 'R']
 
+                        print('LABEL:', label)
                         self._images[img_key]['labels'].append(label)
-                        ann_idx +=1
+
                     self._annotations[img_key].extend(self._images[img_key]['labels'])
 
 
 
-                # Combine image_list and annotations from Darknet and export to Scalabel Format
-                # Export to Darknet
+                    # Combine image_list and annotations from Darknet and export to Scalabel Format
+                    # Export to Darknet
 
 
             ###------------------ Scalabel Data Handler -----------------------###
@@ -238,11 +230,11 @@ class DataFormatter(object):
 
                             self._images[img_key] = {'url': s3uri, 'name': s3uri, 'coco_path': uris2paths[uri],
                                                               'width': width, 'height': height, 'labels': [],
-                                                              'index': idx, 'timestamp': 10000,
+                                                              'index': int(idx), 'timestamp': 10000,
                                                               'videoName': '',
-                                                              'attributes': {'weather': None,
-                                                                             'scene': None,
-                                                                             'timeofday': None}}
+                                                              'attributes': {'weather': 'clear',
+                                                                             'scene': 'undefined',
+                                                                             'timeofday': 'daytime'}}
                             self._annotations[img_key] = []
 
 
@@ -301,7 +293,7 @@ class DataFormatter(object):
                                                           'width': width, 'height': height, 'labels': [],
                                                           'index': idx, 'timestamp': 10000,
                                                           'videoName': '',
-                                                          'attributes': {'weather': None,
+                                                          'attributes': {'weather': 'clear',
                                                                          'scene': None,
                                                                          'timeofday': None}}
                         self._annotations[img_key] = []
@@ -844,6 +836,12 @@ class DataFormatter(object):
             json.dump(coco_output, output_json_file)
 
 
+    def data_grouper(self, iterable, n, fillvalue=None):
+        "Collect data into fixed-length chunks or blocks"
+        # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx
+        args = [iter(iterable)] * n
+        return zip_longest(fillvalue=fillvalue, *args)
+
     def parse_nvidia_smi(self):
         sp = subprocess.Popen(['nvidia-smi', '-q'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out_str = sp.communicate()
@@ -885,14 +883,6 @@ class DataFormatter(object):
             res = os.system(coco2yolo)
 
 
-    def remove_none(self, obj):
-        if isinstance(obj, (list, tuple, set)):
-            return type(obj)(remove_none(x) for x in obj if x is not None)
-        elif isinstance(obj, type(dict)):
-            return type(obj)((remove_none(k), remove_none(v)) for k, v in obj.items() if k is not None and v is not None)
-        else:
-            return obj
-
     def export(self, format = Format.coco, force = False, paginate = True):
         if format == Format.coco:
             if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file) or force == True:
@@ -925,7 +915,7 @@ class DataFormatter(object):
 
             if paginate:
                 img_data = list(self._images.values())
-                for i, chunk in enumerate(DataGrouper(self._images.values(), 5000)):
+                for i, chunk in enumerate(self.data_grouper(self._images.values(), 50)):
                     with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
                         json.dump(list(chunk), output_json_file)
             else:

@@ -19,7 +19,7 @@ def c_array(ctype, values):
     arr = (ctype*len(values))()
     arr[:] = values
     return arr
-DARKNET_BIN
+
 class BOX(Structure):
     _fields_ = [("x", c_float),
                 ("y", c_float),
@@ -144,8 +144,9 @@ def detect(net, meta, image, thresh=.5, hier_thresh=.5, nms=.45):
     free_detections(dets, num)
     return res
 
-def annotate(image_dir, cfg_path, weights_path, data_cfg_pth, detection_threshold = 0.4):
+def annotate(image_dir, cfg_path, weights_path, data_cfg_pth, detection_threshold = 0.25, img_width = 1280, img_height=1080):
     print("Initializing Annotation Pipeline via Darknet ... \o/ \o/")
+
     net = load_net(bytes(str(cfg_path), 'utf-8'), bytes(str(weights_path), 'utf-8') , 0)
     meta = load_meta(bytes(str(data_cfg_pth), 'utf-8'))
     all_anns = []
@@ -158,20 +159,26 @@ def annotate(image_dir, cfg_path, weights_path, data_cfg_pth, detection_threshol
     for fname in image_dirs:
         anns = []
         if fname.endswith(".jpg"):
-            d = {}
+
             r = detect(net, meta, bytes(str(os.path.join(image_dir, fname)), 'utf-8'))
             for detection in r:
+                d = {}
                 d['category'] = detection[0].decode("utf-8")
-                d['box2d'] = {'x1': float(detection[2][0]),
-                              'y1':float(detection[2][1]) ,
-                              'x2': float(detection[2][0]) + float(detection[2][2]) ,
-                              'y2': float(detection[2][1]) + float(detection[2][3])}
+                # Rescale back to original image Size
+                new_y = float( detection[2][1]) - .5 * float(detection[2][3]) #corrects for y offset
+                new_x = float(detection[2][0]) - .5 * float(detection[2][2]) #corrects for x offset
+
+                corrected_detection = [ new_x, new_y, detection[2][2], detection[2][3]]
+                d['box2d'] = {'x1': float(corrected_detection[0]),
+                              'y1':float(corrected_detection[1]) ,
+                              'x2': float(corrected_detection[0]) + float(corrected_detection[2]) ,
+                              'y2': float(corrected_detection[1]) + float(corrected_detection[3])}
                 d['manualAttributes'] = False
                 d['manual'] = False
 
                 if float(detection[1]) >= detection_threshold:
                     anns.append(d)
-        all_anns.append((fname, anns))
+            all_anns.append((fname, anns))
     return all_anns
 
 if __name__ == "__main__":
