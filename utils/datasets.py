@@ -30,7 +30,15 @@ import urllib
 import subprocess
 import pprint
 import ntpath
+from utils import darknet_annotator
+from itertools import zip_longest
 
+class DataGrouper(object):
+    def __init__(iterable, n, fillvalue=None):
+        "Collect data into fixed-length chunks or blocks"
+        # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx
+        args = [iter(iterable)] * n
+        return izip_longest(fillvalue=fillvalue, *args)
 
 
 class Format(Enum):
@@ -106,7 +114,7 @@ class DataFormatter(object):
                     self.input_imgs_dir = os.path.dirname(annotations_list)
 
                 imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
-
+                ann_idx = 0
                 uris2paths = {}
                 uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
                 for idx, uri in uris:
@@ -122,7 +130,7 @@ class DataFormatter(object):
                     if img_data:
                         time = img_data['time_readable'].split(' ')[3]
                         hour = int(time.split(':')[0])
-                        if hour < 6 or (hour > 17 and hour < 19):
+                        if (hour > 4 and hour < 6) or (hour > 17 and hour < 19):
                             timeofday = 'dawn/dusk'
                         elif hour > 6 and hour < 17:
                             timeofday = 'daytime'
@@ -141,14 +149,10 @@ class DataFormatter(object):
                         dataset_path = uris2paths[uri]
 
 
-
-
-
                     im = Image.open(uris2paths[uri])
                     width, height = im.size
                     if self.s3_bucket: s3uri = self.send_to_s3(uri)
 
-                    ## TODO: Build timestamp to timeofday function
                     self._images[img_key] = {'url': s3uri, 'name': s3uri, 'coco_path': dataset_path,
                                                       'width': width, 'height': height, 'labels': [],
                                                       'index': idx, 'timestamp': timestamp,
@@ -157,7 +161,60 @@ class DataFormatter(object):
                                                                      'scene': scene,
                                                                      'timeofday': timeofday}}
                     self._annotations[img_key] = []
+
+                    self.remove_none(self._images)
+
+
                 # Run Darknet on Images to get list of annotations_list
+                # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
+                # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights", 0)
+                # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
+                # annotate(image_dir, cfg_path, weights_path, data_cfg_pth)
+                anns = darknet_annotator.annotate(os.path.abspath(os.path.dirname(dataset_path)),
+                                            "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
+                                            "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights",
+                                            "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
+
+
+                for uri, img_anns in anns:
+                    img_key = self.trainer_prefix+self.path_leaf(uri)
+                    for ann in img_anns:
+                        label = {}
+                        label['id'] = int(ann_idx)
+                        label['attributes'] = ann.get('attributes', None)
+                        if ann.get('attributes', None):
+                            label['attributes'] = {'Occluded': ann['attributes'].get('occluded', False),
+                                                   'Truncated': ann['attributes'].get('truncated', False),
+                                                   'Traffic Light Color': [0, 'NA']}
+
+                        label['manual'] =  ann.get('manual', False)
+                        label['manualAttributes'] = ann.get('manualAttributes', False)
+                        label['poly2d'] = ann.get('poly2d', None)
+                        label['box3d'] = ann.get('box3d', None)
+                        label['box2d'] = ann.get('box2d', None)
+
+                        if label['box2d']:
+                            assert (label['box2d']['x1'] == ann['box2d']['x1']), "Mismatch: {}--{}".format(label['box2d']['x1'], ann['box2d']['x1'])
+                            assert (label['box2d']['x2'] == ann['box2d']['x2']), "Mismatch: {}--{}".format(label['box2d']['x2'], ann['box2d']['x2'])
+                            assert (label['box2d']['y1'] == ann['box2d']['y1']), "Mismatch: {}--{}".format(label['box2d']['y1'], ann['box2d']['y1'])
+                            assert (label['box2d']['y2'] == ann['box2d']['y2']), "Mismatch: {}--{}".format(label['box2d']['y2'], ann['box2d']['y2'])
+
+                        label['category'] = ann['category']
+                        if label['category'] == 'traffic light':
+                            if ann['attributes'].get('trafficLightColor', None):
+                                if ann['attributes']['trafficLightColor'] == 'green':
+                                    label['attributes']['Traffic Light Color'] = [1, 'G']
+                                elif ann['attributes']['trafficLightColor'] == 'yellow':
+                                    label['attributes']['Traffic Light Color'] = [2, 'Y']
+                                elif ann['attributes']['trafficLightColor'] == 'red':
+                                    label['attributes']['Traffic Light Color'] = [3, 'R']
+
+                        self._images[img_key]['labels'].append(label)
+                        ann_idx +=1
+                    self._annotations[img_key].extend(self._images[img_key]['labels'])
+
+
+
                 # Combine image_list and annotations from Darknet and export to Scalabel Format
                 # Export to Darknet
 
@@ -828,7 +885,15 @@ class DataFormatter(object):
             res = os.system(coco2yolo)
 
 
-    def export(self, format = Format.coco, force = False):
+    def remove_none(self, obj):
+        if isinstance(obj, (list, tuple, set)):
+            return type(obj)(remove_none(x) for x in obj if x is not None)
+        elif isinstance(obj, type(dict)):
+            return type(obj)((remove_none(k), remove_none(v)) for k, v in obj.items() if k is not None and v is not None)
+        else:
+            return obj
+
+    def export(self, format = Format.coco, force = False, paginate = True):
         if format == Format.coco:
             if not self.coco_annotations_file or not os.path.exists(self.coco_annotations_file) or force == True:
                 self.generate_coco_annotations()
@@ -854,12 +919,16 @@ class DataFormatter(object):
             self.bdd100k_annotations = os.path.join(self.output_path, 'bdd100k', 'annotations/bdd100k_altered_annotations.json')
             self.generate_names_yml()
 
-
-
             try:
                 os.remove(self.bdd100k_annotations)
-            except OSError:
-                pass
-            with open(self.bdd100k_annotations, "w+") as output_json_file:
-                imgs_list = list(self._images.values())
-                json.dump(imgs_list, output_json_file)
+            except OSError: pass
+
+            if paginate:
+                img_data = list(self._images.values())
+                for i, chunk in enumerate(DataGrouper(self._images.values(), 5000)):
+                    with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
+                        json.dump(list(chunk), output_json_file)
+            else:
+                with open(self.bdd100k_annotations, "w+") as output_json_file:
+                    imgs_list = list(self._images.values())
+                    json.dump(imgs_list, output_json_file)
