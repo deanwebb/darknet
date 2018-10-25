@@ -46,15 +46,30 @@ class Format(Enum):
 DEFAULT_IMG_EXTENSION = '.jpg'
 EXCLUDE_CATS = ['lane', 'drivable area']
 BASE_DIR = '/media/dean/datastore/datasets/BerkeleyDeepDrive/'
-BDD100K_DIR = os.path.join(BASE_DIR, 'bdd100k')
-COCO_BASE = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
+SOURCE_BDD100K_DIR = os.path.join(BASE_DIR, 'bdd100k')
+SOURCE_COCO_DIR = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
 SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames')
+
+## Use old config setup #
+STATIC_NAMES_CONFIG = '/media/dean/deans_data/kache_set/cfg/old.names'
+STATIC_NAMES_CONFIG_YML = '/media/dean/deans_data/kache_set/cfg/old.yml'
+ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
+BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'bdd100k.data')
+BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
+# Use new config setup #
+# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights"
+# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'bdd100k.data')
+# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'yolov3-bdd100k.cfg')
+# STATIC_NAMES_CONFIG = '/media/dean/deans_data/kache_set/cfg/COCO_train2014_0000.names'
+# STATIC_NAMES_CONFIG_YML = '/media/dean/deans_data/kache_set/cfg/kache_category_names.yml'
+
+
 
 
 class DataFormatter(object):
     def __init__(self, annotations_list, s3_bucket = None, check_s3 = False,
                     input_format=Format.scalabel, output_path=os.getcwd(), pickle_file = None,
-                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None, image_list = None, use_cache = False):
+                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None, image_list = None, use_cache = False, use_static_categories = False):
 
         self.input_format = input_format
         self._images = {}
@@ -63,6 +78,7 @@ class DataFormatter(object):
         self.check_s3 = check_s3
         self.output_path = output_path
         self.trainer_prefix = trainer_prefix
+        self.use_static_categories = use_static_categories
         os.makedirs(os.path.join(self.output_path, 'coco'), 0o755 , exist_ok = True )
         self.coco_directory = os.path.join(self.output_path, 'coco')
         self.coco_images_dir = os.path.join(self.coco_directory, 'images', self.trainer_prefix.split('_')[1]+'/')
@@ -124,7 +140,6 @@ class DataFormatter(object):
                         img_key, uris2paths[uri] = self.load_training_img_uri(uri)
 
                         if img_data:
-                            #print('IMAGE_DATA FOUND')
                             time = img_data['time_readable'].split(' ')[3]
                             hour = int(time.split(':')[0])
                             if (hour > 4 and hour < 6) or (hour > 17 and hour < 19):
@@ -162,23 +177,16 @@ class DataFormatter(object):
                                                  'labels': []
                                                 }
                         self._annotations[img_key] = []
-                    # Run Darknet on Images to get list of annotations_list
-                    # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
-                    # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights", 0)
-                    # b"trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
-                    # annotate(image_dir, cfg_path, weights_path, data_cfg_pth)
 
-
-                anns = darknet_annotator.annotate(os.path.abspath(self.input_imgs_dir),
-                                            "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
-                                            "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights",
-                                            "/media/dean/datastore/datasets/darknet/trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data")
-
+                self.generate_configs_for_inference()
+                print("DATA_CONFIG:", self.current_data_cfg_path)
+                print("MODEL_CONFIG:", self.current_model_cfg_path)
+                print("MODEL_WEIGHTS:", self.inference_model)
+                anns = darknet_annotator.annotate(os.path.abspath(self.input_imgs_dir), self.current_model_cfg_path, self.inference_model, self.current_data_cfg_path)
 
                 ann_idx = 0
                 for uri, img_anns in anns:
                     img_key, uris2paths[uri] = self.load_training_img_uri(uri)
-                    print('IMAGE_ANN:', img_anns)
                     for ann in img_anns:
                         label = {}
                         label['id'] = int(ann_idx)
@@ -200,15 +208,11 @@ class DataFormatter(object):
 
                         label['category'] = ann['category']
 
-                        print('LABEL:', label)
                         self._images[img_key]['labels'].append(label)
 
                     self._annotations[img_key].extend(self._images[img_key]['labels'])
 
 
-
-                    # Combine image_list and annotations from Darknet and export to Scalabel Format
-                    # Export to Darknet
 
 
             ###------------------ Scalabel Data Handler -----------------------###
@@ -343,7 +347,7 @@ class DataFormatter(object):
                             train_type = 'train'
                             if 'val' in self.trainer_prefix and 'train' not in self.trainer_prefix:
                                 train_type  = 'val'
-                            img_label_name = os.path.join(BDD100K_DIR, 'images/100k', train_type, img_label['name'])
+                            img_label_name = os.path.join(SOURCE_BDD100K_DIR, 'images/100k', train_type, img_label['name'])
 
                         img_key, img_uri = self.load_training_img_uri(img_label_name)
                         im = Image.open(img_uri)
@@ -401,6 +405,8 @@ class DataFormatter(object):
                             self._images[img_key]['labels'].append(label)
                             ann_idx +=1
                         self._annotations[img_key].extend(self._images[img_key]['labels'])
+
+
 
 
             ###------------------ VGG Data Handler-(Legacy Labeler) -----------------------###
@@ -511,6 +517,102 @@ class DataFormatter(object):
         print('Length of COCO Images', len(self._images))
         self.show_data_distribution()
 
+    def generate_configs_for_inference(self):
+        # Override data config
+        self.current_inference_dir = os.path.join(self.output_path, 'inference')
+        os.makedirs(os.path.join(self.current_inference_dir, 'data'), exist_ok = True)
+        os.makedirs(os.path.join(self.current_inference_dir, 'cfg'), exist_ok = True)
+        self.models_path = os.path.abspath(os.path.join(self.current_inference_dir, 'models'))
+        os.makedirs(self.models_path, exist_ok = True)
+        self.inference_model = os.path.join(self.models_path, self.path_leaf(ANNOTATION_MODEL))
+        shutil.copy(ANNOTATION_MODEL, self.inference_model)
+
+        self.generate_names_yml()
+        self.generate_names_cfg()
+
+        # Override Data config
+        self.current_data_cfg = self.parse_data_config(BASE_DATA_CONFIG)
+        self.current_data_cfg = self.inject_data_config(self.current_data_cfg)
+        self.current_data_cfg_path = self.save_data_config(self.current_data_cfg, os.path.join(self.current_inference_dir, 'cfg', self.path_leaf(BASE_DATA_CONFIG)))
+
+        # Override model config
+        self.current_model_cfg = self.parse_model_config(BASE_MODEL_CONFIG)
+        self.current_model_cfg = self.inject_model_config(self.current_model_cfg)
+        self.current_model_cfg_path = self.save_model_config(self.current_model_cfg, os.path.join(self.current_inference_dir, 'cfg', self.path_leaf(BASE_MODEL_CONFIG)))
+
+    def parse_model_config(self, path):
+        """Parses the yolo-v3 layer configuration file and returns module definitions"""
+        file = open(path, 'r')
+        lines = file.read().split('\n')
+        lines = [x for x in lines if x and not x.startswith('#')]
+        lines = [x.rstrip().lstrip() for x in lines] # get rid of fringe whitespaces
+        module_defs = []
+        for line in lines:
+            if line.startswith('['): # This marks the start of a new block
+                module_defs.append({})
+                module_defs[-1]['type'] = line[1:-1].rstrip()
+                if module_defs[-1]['type'] == 'convolutional':
+                    module_defs[-1]['batch_normalize'] = 0
+            else:
+                key, value = line.split("=")
+                value = value.strip()
+                module_defs[-1][key.rstrip()] = value.strip()
+
+        return module_defs
+
+    def parse_data_config(self, path):
+        """Parses the data configuration file"""
+        options = dict()
+        options['gpus'] = '0,1'
+        with open(path, 'r') as fp:
+            lines = fp.readlines()
+        for line in lines:
+            line = line.strip()
+            if line == '' or line.startswith('#'):
+                continue
+            key, value = line.split('=')
+            options[key.strip()] = value.strip()
+        return options
+
+
+    def save_model_config(self, model_defs, path, overwrite = False):
+        if not os.path.exists(path) or overwrite == True:
+            """Saves the yolo-v3 layer configuration file"""
+            with open(path, 'w') as writer:
+                for block in model_defs:
+                    writer.write('['+ block['type'] +']'+'\n')
+                    [writer.write(str(k)+'='+str(v)+'\n') for k,v in block.items() if k != 'type']
+                    writer.write('\n')
+        return path
+
+
+    def save_data_config(self, data_config, path, overwrite = False):
+        """Saves the yolo-v3 data configuration file"""
+        if not os.path.exists(path) or overwrite == True:
+            with open(path, 'w') as writer:
+                [writer.write(str(k)+'='+str(v)+'\n') for k,v in data_config.items()]
+        return path
+
+    def inject_model_config(self, model_config):
+        for i, block in enumerate(model_config):
+            if block['type'] == 'yolo':
+                block['classes'] = len(self.category_names)
+                model_config[i-1]['filters'] = (len(self.category_names)+5)*3
+        return model_config
+
+
+    def inject_data_config(self, data_config):
+        data_config['train'] = self.darknet_manifast
+        data_config['classes'] = len(self.category_names)
+        data_config['valid'] = self.darknet_manifast
+        data_config['names'] = self.names_config
+        data_config['backup'] = self.models_path
+        num_gpus = int(self.parse_nvidia_smi()['Attached GPUs'])
+        data_config['gpus'] = ','.join(str(i) for i in range(num_gpus))
+
+
+        return data_config
+
     def merge(self, merging_set, include = [], exclude = None, reject_new_categories = True):
         # If any categories in include, merge them with datasets
         include = [x.replace(' ','').lower() for x in include]
@@ -619,8 +721,8 @@ class DataFormatter(object):
                 os.makedirs(os.path.split(destination)[0], exist_ok = True)
                 shutil.copyfile(source_uri, destination)
             # Try checking coco path for image (since they are mixed)
-            elif os.path.exists(os.path.join(COCO_BASE, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))):
-                    source_uri = os.path.join(COCO_BASE, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
+            elif os.path.exists(os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))):
+                    source_uri = os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
                     os.makedirs(os.path.split(destination)[0], exist_ok = True)
                     shutil.copyfile(source_uri, destination)
             elif urllib.parse.urlparse(source_uri).scheme != "":
@@ -643,12 +745,12 @@ class DataFormatter(object):
             train_type  = 'val'
 
         if urllib.parse.urlparse(fname).scheme != "" or os.path.isabs(fname):
-            fname = os.path.join(BDD100K_DIR, 'images/100k', train_type, fname)
+            fname = os.path.join(SOURCE_BDD100K_DIR, 'images/100k', train_type, fname)
         else:
             if self.input_format == Format.bdd:
-                fname = os.path.join(BDD100K_DIR, 'images/100k', train_type, fname)
+                fname = os.path.join(SOURCE_BDD100K_DIR, 'images/100k', train_type, fname)
             elif self.input_format == Format.coco:
-                SOURCE_COCO_DIR =  os.path.join(COCO_BASE, 'images', self.trainer_prefix.split('_')[1])
+                SOURCE_COCO_DIR =  os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1])
                 fname = os.path.join(SOURCE_COCO_DIR, self.path_leaf(fname))
             elif self.input_format == Format.kache:
                 fname = os.path.join(SOURCE_KACHE_DIR, self.path_leaf(fname))
@@ -693,21 +795,42 @@ class DataFormatter(object):
 
     def generate_names_cfg(self):
         self.names_config = os.path.join(self.config_dir, self.trainer_prefix+'.names')
-        with open(self.names_config, 'w+') as writer:
-            for category in sorted(set(self.category_names)):
-                writer.write(category+'\n')
+        if self.use_static_categories:
+            with open(STATIC_NAMES_CONFIG, "r") as reader:
+                cats = [x.strip('\n') for x in reader]
+                self.category_names =  cats
+
+            with open(self.names_config, 'w+') as writer:
+                for category in self.category_names:
+                    writer.write(category+'\n')
+        else:
+            with open(self.names_config, 'w+') as writer:
+                for category in sorted(set(self.category_names)):
+                    writer.write(category+'\n')
 
     def generate_names_yml(self):
-        anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
-        cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
-        categories = []
-        [categories.extend(cat) for cat in cats]
-        self.category_names = sorted(set(categories))
+        self.names_config_yml = os.path.join(self.config_dir, self.trainer_prefix+'_names.yml')
+        if self.use_static_categories:
+            with open(STATIC_NAMES_CONFIG_YML, "r") as reader:
+                cats = [x.strip('\n').replace('- name: ', '') for x in reader]
+                self.category_names =  cats
 
-        self.names_config = os.path.join(self.config_dir, self.trainer_prefix+'_names.yml')
-        with open(self.names_config, 'w+') as writer:
-            for category in sorted(set(self.category_names)):
-                writer.write('- name: '+category+'\n')
+            with open(self.names_config_yml, 'w+') as writer:
+                for category in self.category_names:
+                    writer.write('- name: '+category+'\n')
+        else:
+            anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
+            cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
+            categories = []
+            [categories.extend(cat) for cat in cats]
+            self.category_names = sorted(set(categories))
+
+            with open(self.names_config_yml, 'w+') as writer:
+                for category in sorted(set(self.category_names)):
+                    writer.write('- name: '+category+'\n')
+
+
+
 
     def path_leaf(self, path):
         if urllib.parse.urlparse(path).scheme != "" or os.path.isabs(path):
@@ -769,14 +892,19 @@ class DataFormatter(object):
         return anns, images
 
     def generate_coco_annotations(self):
-        anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
-        cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
-        categories = []
-        [categories.extend(cat) for cat in cats]
-        self.category_names = sorted(set(categories))
+        if self.use_static_categories:
+            with open(STATIC_NAMES_CONFIG, "r") as reader:
+                cats = [x.strip('\n') for x in reader]
+                self.category_names =  set(cats)
+        else:
+            anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
+            cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
+            categories = []
+            [categories.extend(cat) for cat in cats]
+            self.category_names = sorted(set(categories))
         self.cats2ids, self.ids2cats = {}, {}
 
-        for i, label in enumerate(sorted(set(categories))):
+        for i, label in enumerate(self.category_names):
             self.cats2ids[str(label).lower()] = i
         self.ids2cats = {i: v for v, i in self.cats2ids.items()}
 
@@ -915,7 +1043,7 @@ class DataFormatter(object):
 
             if paginate:
                 img_data = list(self._images.values())
-                for i, chunk in enumerate(self.data_grouper(self._images.values(), 50)):
+                for i, chunk in enumerate(self.data_grouper(self._images.values(), 1000)):
                     with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
                         json.dump(list(chunk), output_json_file)
             else:

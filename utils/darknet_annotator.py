@@ -162,6 +162,7 @@ def annotate(image_dir, cfg_path, weights_path, data_cfg_pth, detection_threshol
 
             r = detect(net, meta, bytes(str(os.path.join(image_dir, fname)), 'utf-8'))
             for detection in r:
+                #print('DETECTION:', detection)
                 d = {}
                 d['category'] = detection[0].decode("utf-8")
                 # Rescale back to original image Size
@@ -193,4 +194,4 @@ if __name__ == "__main__":
         if fname.endswith(".jpg"):
             x = (os.path.join(directory, fname))
             r = detect(net, meta, bytes(os.path.join(directory, fname), 'utf-8'))
-            print('IMAGEPATH: {} |'.format(fname), r)
+            #print('IMAGEPATH: {} |'.format(fname), r)
