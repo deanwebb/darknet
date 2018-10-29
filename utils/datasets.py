@@ -51,8 +51,8 @@ SOURCE_COCO_DIR = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
 SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames')
 
 ## Use old config setup #
-STATIC_NAMES_CONFIG = '/media/dean/deans_data/kache_set/cfg/old.names'
-STATIC_NAMES_CONFIG_YML = '/media/dean/deans_data/kache_set/cfg/old.yml'
+STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/kache_ai/old_cfg/old.names'
+STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/kache_ai/old_cfg/old.yml'
 ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
 BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'bdd100k.data')
 BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
@@ -63,6 +63,26 @@ BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg'
 # STATIC_NAMES_CONFIG = '/media/dean/deans_data/kache_set/cfg/COCO_train2014_0000.names'
 # STATIC_NAMES_CONFIG_YML = '/media/dean/deans_data/kache_set/cfg/kache_category_names.yml'
 
+'''
+Current Categories
+- name: person
+- name: rider
+- name: car
+- name: truck
+- name: bus
+- name: train
+- name: motor
+- name: bike
+- name: traffic sign
+- name: traffic light
+- name: trailer
+- name: construct-cone
+- name: construct-sign
+- name: construct-barrel
+- name: construct-pole
+- name: construct-stand
+- name: construct-equipment
+'''
 
 
 
@@ -268,6 +288,9 @@ class DataFormatter(object):
                         img_data['index'] = ann['index']
 
                         self._images[img_prefix+fname] = img_data
+
+
+
 
             ###------------------ MS COCO Data Handler -----------------------###
             if self.input_format == Format.coco:
@@ -750,8 +773,8 @@ class DataFormatter(object):
             if self.input_format == Format.bdd:
                 fname = os.path.join(SOURCE_BDD100K_DIR, 'images/100k', train_type, fname)
             elif self.input_format == Format.coco:
-                SOURCE_COCO_DIR =  os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1])
-                fname = os.path.join(SOURCE_COCO_DIR, self.path_leaf(fname))
+                COCO_DIR =  os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1])
+                fname = os.path.join(COCO_DIR, self.path_leaf(fname))
             elif self.input_format == Format.kache:
                 fname = os.path.join(SOURCE_KACHE_DIR, self.path_leaf(fname))
 
@@ -997,7 +1020,8 @@ class DataFormatter(object):
         elif 'darknet' in os.path.split(os.path.abspath(os.path.join(self.output_path, os.pardir, os.pardir, os.pardir, os.pardir)))[1].strip('/'):
             yolo_converter = os.path.join(os.path.abspath(val_par_path), 'convert2Yolo/example.py')
         else:
-            yolo_converter = os.path.join(os.path.abspath(par_path),'darknet', 'convert2Yolo/example.py')
+            # yolo_converter = os.path.join(os.path.abspath(par_path),'darknet', 'convert2Yolo/example.py')
+            yolo_converter = os.path.join('/media/dean/datastore/datasets/darknet', 'convert2Yolo/example.py')
 
         os.makedirs(os.path.abspath(os.path.join(darknet_conversion_results, os.pardir)), exist_ok = True)
         if not os.path.exists(darknet_conversion_results):
@@ -1043,7 +1067,7 @@ class DataFormatter(object):
 
             if paginate:
                 img_data = list(self._images.values())
-                for i, chunk in enumerate(self.data_grouper(self._images.values(), 1000)):
+                for i, chunk in enumerate(self.data_grouper(self._images.values(), 5000)):
                     with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
                         json.dump(list(chunk), output_json_file)
             else:

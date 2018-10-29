@@ -165,9 +165,9 @@ def annotate(image_dir, cfg_path, weights_path, data_cfg_pth, detection_threshol
                 #print('DETECTION:', detection)
                 d = {}
                 d['category'] = detection[0].decode("utf-8")
-                # Rescale back to original image Size
-                new_y = float( detection[2][1]) - .5 * float(detection[2][3]) #corrects for y offset
-                new_x = float(detection[2][0]) - .5 * float(detection[2][2]) #corrects for x offset
+                # Convert (x_center, y_center) to (x1, y1)
+                new_y = float(detection[2][1]) - .5 * float(detection[2][3])
+                new_x = float(detection[2][0]) - .5 * float(detection[2][2])
 
                 corrected_detection = [ new_x, new_y, detection[2][2], detection[2][3]]
                 d['box2d'] = {'x1': float(corrected_detection[0]),
