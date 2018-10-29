@@ -30,16 +30,17 @@ from utils import datasets
 
 
 ## Configuration Parameters ##
-BDD100K_DIR = os.path.join('/media/dean/datastore1/datasets/BerkeleyDeepDrive', 'bdd100k')
+SOURCE_BDD100K_DIR = os.path.join('/media/dean/datastore/datasets/BerkeleyDeepDrive', 'bdd100k')
 WORKING_DIR = os.getcwd()
 TRAINERS_DIR = os.path.join(WORKING_DIR, 'trainers')
-ANNOTATIONS_LIST = os.path.join(BDD100K_DIR, 'labels/bdd100k_labels_images_train.json')
-VAL_ANNOTATIONS_LIST = os.path.join(BDD100K_DIR, 'labels/bdd100k_labels_images_val.json')
+ANNOTATIONS_LIST = os.path.join(SOURCE_BDD100K_DIR, 'labels/bdd100k_labels_images_train.json')
+VAL_ANNOTATIONS_LIST = os.path.join(SOURCE_BDD100K_DIR, 'labels/bdd100k_labels_images_val.json')
 
-COCO_ANNOTATIONS_LIST = os.path.join('/media/dean/datastore1/datasets/road_coco/darknet/data/coco/annotations/instances_train2014.json')
+COCO_ANNOTATIONS_LIST = os.path.join('/media/dean/datastore/datasets/road_coco/darknet/data/coco/annotations/instances_train2014.json')
 BASE_DATA_CONFIG = os.path.join(WORKING_DIR, 'cfg', 'bdd100k.data')
 BASE_MODEL_CONFIG = os.path.join(WORKING_DIR, 'cfg', 'yolov3-bdd100k.cfg')
 S3_BUCKET = 'kache-scalabel/bdd100k/images/100k/train/'
+KACHE_S3 = 'kache-scalabel/kache_ai/frames/'
 
 
 class Darkernet():
@@ -107,7 +108,8 @@ class Darkernet():
                            'lr': float('0.'+tokens[2].replace('lr','')),
                            'batch': int(tokens[3].replace('bat','')),
                            'subdivisions': int(tokens[4].replace('sd','')),
-                           'epochs': int(tokens[5].replace('ep',''))}
+                           'epochs': int(tokens[5].replace('ep','')),
+                           'stopbackwards': int(tokens[6].replace('sb',''))}
 
             if not self.bdd_validation_set:
                 self.bdd_validation_set = self.generate_validation_set()
@@ -146,7 +148,7 @@ class Darkernet():
             self.evaluate(evaluate_all = True)
 
     def parse_model_config(self, path):
-        """Parses the yolo-v3 layer configuration file and returns module definitions"""
+        """Parses the yolo-v3 layer configuration file and returns model definitions"""
         file = open(path, 'r')
         lines = file.read().split('\n')
         lines = [x for x in lines if x and not x.startswith('#')]
@@ -222,6 +224,13 @@ class Darkernet():
                     block['classes'] = len(self.dataset.category_names)
                     block['anchors'] = self.anchors
                     model_config[i-1]['filters'] = (len(self.dataset.category_names)+5)*3
+            elif block['type'] == '':
+                num_layers += 1
+
+            # TODO: Freeze layers #
+
+            layers_to_unfreeze = hyperparams['stopbackwards']
+
         return model_config
 
 
@@ -286,6 +295,8 @@ class Darkernet():
             iterations = fname.split('_')[-1].split('.weights')[0]
             if iterations == 'darknet53.conv.74':
                 d[fname] = 0
+            elif iterations == 'volov3':
+                continue
             elif iterations != 'final':
                 d[fname] = int(iterations)
             else:
@@ -298,7 +309,7 @@ class Darkernet():
 
 
     def evaluate(self, evaluate_all = False):
-        """ Generates a validation set in BDD format and then Runs mAP against backup_dir"""
+        """ Generates a validation set in BDD format and then Runs mAP against all models in the backup_dir"""
         self.current_train_metrics = OrderedDict()
         if not self.bdd_validation_set:
             self.bdd_validation_set = self.generate_validation_set()
@@ -399,13 +410,12 @@ class Darkernet():
             with open(outfile,"w+") as f:
                 f.write(proc.communicate()[0].decode("utf-8"))
 
-            # TODO: Add Evaluation procedure
             # TODO: Add early stopping
-            # Run Validation #
-            #self.evaluate()
+            # Run Validation After each Epoch #
+            # self.evaluate()
 
         except KeyboardInterrupt:
-            print("\nNow exiting... Results file: " + str(outfile) +
+            print("\nNow exiting optimization... Results file: " + str(outfile) +
                   "\nCurrent weights: " + str(self.get_latest_weights()))
             f.close()
 
@@ -427,7 +437,7 @@ if __name__ == "__main__":
     parser.add_argument('-w', "--weights", default=os.path.join(WORKING_DIR,'backup', 'darknet53.conv.74'),
                         action="store", help="working directory of darknet files.")
     parser.add_argument('-r', "--resume",
-                        action="store_true", help="Grabs latests weights from backup and resumes training")
+                        action="store", help="Grabs latests weights from backup and resumes training")
     parser.add_argument('-f', "--format", default='BDD',
                         action="store", help="supported input formats: BDD|COCO|OPENIMGS|SCALABEL|KACHE|VGG")
     args = parser.parse_args()
