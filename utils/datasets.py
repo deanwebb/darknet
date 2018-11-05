@@ -32,6 +32,9 @@ import pprint
 import ntpath
 from utils import darknet_annotator
 from itertools import zip_longest
+import time
+from functools import wraps
+import http
 
 
 class Format(Enum):
@@ -51,17 +54,17 @@ SOURCE_COCO_DIR = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
 SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames')
 
 ## Use old config setup #
-STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/kache_ai/old_cfg/old.names'
-STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/kache_ai/old_cfg/old.yml'
-ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
-BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'bdd100k.data')
-BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
+# STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/kache_ai/static_cfg/static.names'
+# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/kache_ai/static_cfg/static.yml'
+# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
+# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'bdd100k.data')
+# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
 # Use new config setup #
-# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights"
-# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'bdd100k.data')
-# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'yolov3-bdd100k.cfg')
-# STATIC_NAMES_CONFIG = '/media/dean/deans_data/kache_set/cfg/COCO_train2014_0000.names'
-# STATIC_NAMES_CONFIG_YML = '/media/dean/deans_data/kache_set/cfg/kache_category_names.yml'
+ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights"
+BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'bdd100k.data')
+BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'yolov3-bdd100k.cfg')
+STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/kache_set/cfg/COCO_train2014_0000.names'
+STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/darknet/data/kache_set/cfg/kache_category_names.yml'
 
 '''
 Current Categories
@@ -82,6 +85,10 @@ Current Categories
 - name: construct-pole
 - name: construct-stand
 - name: construct-equipment
+- name: construct-equipment
+- name: traffic light-red
+- name: traffic light-amber
+- name: traffic light-green
 '''
 
 
@@ -393,41 +400,42 @@ class DataFormatter(object):
                                                               'videoName': BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0])}
 
                         self._annotations[img_key] = []
-                        for ann in [l for l in img_label['labels']]:
-                            label = {}
-                            label['id'] = int(ann_idx)
-                            label['attributes'] = ann.get('attributes', None)
-                            if ann.get('attributes', None):
-                                label['attributes'] = {'Occluded': ann['attributes'].get('occluded', False),
-                                                       'Truncated': ann['attributes'].get('truncated', False),
-                                                       'Traffic Light Color': [0, 'NA']}
+                        if img_label.get('labels', None):
+                            for ann in [l for l in img_label['labels']]:
+                                label = {}
+                                label['id'] = int(ann_idx)
+                                label['attributes'] = ann.get('attributes', None)
+                                if ann.get('attributes', None):
+                                    label['attributes'] = {'Occluded': ann['attributes'].get('occluded', False),
+                                                           'Truncated': ann['attributes'].get('truncated', False),
+                                                           'Traffic Light Color': [0, 'NA']}
 
-                            label['manual'] =  ann.get('manualShape', True)
-                            label['manualAttributes'] = ann.get('manualAttributes', True)
-                            label['poly2d'] = ann.get('poly2d', None)
-                            label['box3d'] = ann.get('box3d', None)
-                            label['box2d'] = ann.get('box2d', None)
+                                label['manual'] =  ann.get('manualShape', True)
+                                label['manualAttributes'] = ann.get('manualAttributes', True)
+                                label['poly2d'] = ann.get('poly2d', None)
+                                label['box3d'] = ann.get('box3d', None)
+                                label['box2d'] = ann.get('box2d', None)
 
-                            if label['box2d']:
-                                assert (label['box2d']['x1'] == ann['box2d']['x1']), "Mismatch: {}--{}".format(label['box2d']['x1'], ann['box2d']['x1'])
-                                assert (label['box2d']['x2'] == ann['box2d']['x2']), "Mismatch: {}--{}".format(label['box2d']['x2'], ann['box2d']['x2'])
-                                assert (label['box2d']['y1'] == ann['box2d']['y1']), "Mismatch: {}--{}".format(label['box2d']['y1'], ann['box2d']['y1'])
-                                assert (label['box2d']['y2'] == ann['box2d']['y2']), "Mismatch: {}--{}".format(label['box2d']['y2'], ann['box2d']['y2'])
+                                if label['box2d']:
+                                    assert (label['box2d']['x1'] == ann['box2d']['x1']), "Mismatch: {}--{}".format(label['box2d']['x1'], ann['box2d']['x1'])
+                                    assert (label['box2d']['x2'] == ann['box2d']['x2']), "Mismatch: {}--{}".format(label['box2d']['x2'], ann['box2d']['x2'])
+                                    assert (label['box2d']['y1'] == ann['box2d']['y1']), "Mismatch: {}--{}".format(label['box2d']['y1'], ann['box2d']['y1'])
+                                    assert (label['box2d']['y2'] == ann['box2d']['y2']), "Mismatch: {}--{}".format(label['box2d']['y2'], ann['box2d']['y2'])
 
-                            label['category'] = ann['category']
-                            if label['category'] == 'traffic light':
-                                if ann['attributes'].get('trafficLightColor', None):
-                                    if ann['attributes']['trafficLightColor'] == 'green':
-                                        label['attributes']['Traffic Light Color'] = [1, 'G']
-                                    elif ann['attributes']['trafficLightColor'] == 'yellow':
-                                        label['attributes']['Traffic Light Color'] = [2, 'Y']
-                                    elif ann['attributes']['trafficLightColor'] == 'red':
-                                        label['attributes']['Traffic Light Color'] = [3, 'R']
-                                else:
-                                    ann['attributes']['Traffic Light Color'] == label['attributes']['Traffic Light Color']
-                            self._images[img_key]['labels'].append(label)
-                            ann_idx +=1
-                        self._annotations[img_key].extend(self._images[img_key]['labels'])
+                                label['category'] = ann['category']
+                                if label['category'] == 'traffic light':
+                                    if ann['attributes'].get('trafficLightColor', None):
+                                        if ann['attributes']['trafficLightColor'] == 'green':
+                                            label['attributes']['Traffic Light Color'] = [1, 'G']
+                                        elif ann['attributes']['trafficLightColor'] == 'yellow':
+                                            label['attributes']['Traffic Light Color'] = [2, 'Y']
+                                        elif ann['attributes']['trafficLightColor'] == 'red':
+                                            label['attributes']['Traffic Light Color'] = [3, 'R']
+                                    else:
+                                        ann['attributes']['Traffic Light Color'] == label['attributes']['Traffic Light Color']
+                                self._images[img_key]['labels'].append(label)
+                                ann_idx +=1
+                            self._annotations[img_key].extend(self._images[img_key]['labels'])
 
 
 
@@ -738,6 +746,55 @@ class DataFormatter(object):
         print('\n'+'#'*48+'\n')
 
 
+
+
+    def retry(ExceptionToCheck, tries=4, delay=3, backoff=2, logger=None):
+        """Retry calling the decorated function using an exponential backoff.
+
+        http://www.saltycrane.com/blog/2009/11/trying-out-retry-decorator-python/
+        original from: http://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+
+        :param ExceptionToCheck: the exception to check. may be a tuple of
+            exceptions to check
+        :type ExceptionToCheck: Exception or tuple
+        :param tries: number of times to try (not retry) before giving up
+        :type tries: int
+        :param delay: initial delay between retries in seconds
+        :type delay: int
+        :param backoff: backoff multiplier e.g. value of 2 will double the delay
+            each retry
+        :type backoff: int
+        :param logger: logger to use. If None, print
+        :type logger: logging.Logger instance
+        """
+        def deco_retry(f):
+
+            @wraps(f)
+            def f_retry(*args, **kwargs):
+                mtries, mdelay = tries, delay
+                while mtries > 1:
+                    try:
+                        return f(*args, **kwargs)
+                    except ExceptionToCheck as e:
+                        msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                        if logger:
+                            logger.warning(msg)
+                        else:
+                            print(msg)
+                        time.sleep(mdelay)
+                        mtries -= 1
+                        mdelay *= backoff
+                return f(*args, **kwargs)
+
+            return f_retry  # true decorator
+
+        return deco_retry
+
+    @retry(http.client.RemoteDisconnected, tries=5, delay=3, backoff=2)
+    @retry(urllib.error.HTTPError, tries=5, delay=3, backoff=2)
+    def urlrequest_with_retry(self, source, destination):
+        return urllib.request.urlretrieve(source, destination)
+
     def maybe_download(self, source_uri, destination):
         if not os.path.exists(destination):
             if os.path.exists(source_uri):
@@ -754,7 +811,7 @@ class DataFormatter(object):
             elif self.s3_bucket:
                 print('SOURCE: ', self.send_to_s3(source_uri.replace(self.trainer_prefix, '')))
                 print('DEST: ', destination)
-                destination, _ = urllib.request.urlretrieve(self.send_to_s3(source_uri), destination)
+                destination, _ = self.urlrequest_with_retry(self.send_to_s3(source_uri), destination)
             else:
                 print('Could not copy file', source_uri, 'to file:', destination, '. Does not exist')
 
