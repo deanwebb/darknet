@@ -189,7 +189,7 @@ class Darkernet():
 
     def generate_anchors(self, clusters = 9, width = 416, height = 416):
         gen_anchors_cmd = "cd {} && ./darknet detector calc_anchors {} \
-        -num_of_clusters {} -width {} -height {}".format(self.current_working_dir, self.current_data_cfg_path, clusters, width, height)
+        -num_of_clusters {} -width {} -height {} > {}".format(self.current_working_dir, self.current_data_cfg_path, clusters, width, height, 'anchor_results.txt')
         print('Calculating Anchors from dataset distribution...')
         os.system(gen_anchors_cmd)
         with open(self.anchors_path) as f:
@@ -198,11 +198,9 @@ class Darkernet():
 
     def inject_model_config(self, model_config, hyperparams, validation = False):
         self.anchors_path = os.path.join(self.current_working_dir, 'anchors.txt')
-        if not os.path.exists(self.anchors_path):
-            self.generate_anchors()
-        else:
-            with open(self.anchors_path) as f:
-                self.anchors = f.readlines()[0].strip('\'')
+        self.generate_anchors()
+        with open(self.anchors_path) as f:
+            self.anchors = f.readlines()[0].strip('\'')
 
         for i, block in enumerate(model_config):
             if block['type'] == 'net':
@@ -228,7 +226,6 @@ class Darkernet():
                 num_layers += 1
 
             # TODO: Freeze layers #
-
             layers_to_unfreeze = hyperparams['stopbackwards']
 
         return model_config
