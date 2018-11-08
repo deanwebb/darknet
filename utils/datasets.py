@@ -83,12 +83,13 @@ Current Categories
 - name: construct-sign
 - name: construct-barrel
 - name: construct-pole
-- name: construct-stand
-- name: construct-equipment
 - name: construct-equipment
 - name: traffic light-red
 - name: traffic light-amber
 - name: traffic light-green
+- name: traffic sign-stop_sign
+- name: traffic sign-slow_sign
+- name: traffic sign-speed_sign
 '''
 
 
@@ -440,6 +441,7 @@ class DataFormatter(object):
 
 
 
+
             ###------------------ VGG Data Handler-(Legacy Labeler) -----------------------###
             elif self.input_format == Format.vgg:
                 HEADER_ROW=['filename', 'file_size', 'file_attributes', 'region_count',
@@ -539,6 +541,9 @@ class DataFormatter(object):
                     self._annotations[img_prefix+fname].extend(img['labels'])
 
 
+            # Convert attributes to Categories
+            self.attributes_to_cats('trafficLightColor')
+
             # Save object to picklefile
             pickle_dict = {'images':self._images,'annotations':self._annotations}
             print('Saving to Pickle File:', self._pickle_file)
@@ -547,6 +552,40 @@ class DataFormatter(object):
 
         print('Length of COCO Images', len(self._images))
         self.show_data_distribution()
+
+    def attributes_to_cats(self, attribute):
+        if attribute == 'trafficLightColor':
+            for fname in self._images.keys():
+                if self._images[fname].get('labels', None):
+                    for label in [l for l in  self._images[fname]['labels'] if l['category'] == 'traffic light' and l.get('attributes', None)]:
+                        if label['attributes'].get('trafficLightColor', None):
+                            if label['attributes']['trafficLightColor'].lower() == 'green':
+                                label['category'] = 'traffic light-green'
+                            elif label['attributes']['trafficLightColor'].lower() == 'yellow':
+                                label['category'] = 'traffic light-amber'
+                            elif label['attributes']['trafficLightColor'].lower() == 'red':
+                                label['category'] = 'traffic light-red'
+                            else:
+                                label['category'] = 'traffic light'
+
+                        # Support both old and new bdd formats
+                        elif label['attributes'].get('Traffic Light Color', None):
+                            if label['attributes']['Traffic Light Color'][1].lower() == 'g':
+                                label['category'] = 'traffic light-green'
+                            elif label['attributes']['Traffic Light Color'][1].lower() == 'y':
+                                label['category'] = 'traffic light-amber'
+                            elif label['attributes']['Traffic Light Color'][1].lower() == 'r':
+                                label['category'] = 'traffic light-red'
+                            else:
+                                label['category'] = 'traffic light'
+
+                        # Update corresponding annotation
+                        for ann in self._annotations[fname]:
+                            if ann['id'] == label['id']:
+                                # overwrite annotation with new label
+                                ann = label
+
+
 
     def generate_configs_for_inference(self):
         # Override data config
