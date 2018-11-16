@@ -35,7 +35,9 @@ from itertools import zip_longest
 import time
 from functools import wraps
 import http
-
+from pathlib import Path
+import copy
+from operator import itemgetter
 
 class Format(Enum):
     scalabel = 0
@@ -48,23 +50,23 @@ class Format(Enum):
 
 DEFAULT_IMG_EXTENSION = '.jpg'
 EXCLUDE_CATS = ['lane', 'drivable area']
-BASE_DIR = '/media/dean/datastore/datasets/BerkeleyDeepDrive/'
+BASE_DIR = '/media/dean/datastore1/datasets/BerkeleyDeepDrive/'
 SOURCE_BDD100K_DIR = os.path.join(BASE_DIR, 'bdd100k')
-SOURCE_COCO_DIR = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
-SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames')
+SOURCE_COCO_DIR = '/media/dean/datastore1/datasets/road_coco/darknet/data/coco/'
+SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore1/datasets/kache_ai', 'frames')
 
 ## Use old config setup #
-# STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/kache_ai/static_cfg/static.names'
-# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/kache_ai/static_cfg/static.yml'
-# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
-# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'bdd100k.data')
-# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
+# STATIC_NAMES_CONFIG = '/media/dean/datastore1/datasets/kache_ai/static_cfg/static.names'
+# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore1/datasets/kache_ai/static_cfg/static.yml'
+# ANNOTATION_MODEL =  "/media/dean/datastore1/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
+# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet', 'cfg', 'bdd100k.data')
+# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
 # Use new config setup #
-ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights"
-BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'bdd100k.data')
-BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'yolov3-bdd100k.cfg')
-STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/kache_set/cfg/COCO_train2014_0000.names'
-STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/darknet/data/kache_set/cfg/kache_category_names.yml'
+ANNOTATION_MODEL =  "/media/dean/datastore1/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights"
+BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'bdd100k.data')
+BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'yolov3-bdd100k.cfg')
+STATIC_NAMES_CONFIG = '/media/dean/datastore1/datasets/darknet/data/cfg/COCO_train2014_0000.names'
+STATIC_NAMES_CONFIG_YML = '/media/dean/datastore1/datasets/darknet/data/cfg/kache_category_names.yml'
 
 '''
 Current Categories
@@ -101,7 +103,7 @@ class DataFormatter(object):
 
         self.input_format = input_format
         self._images = {}
-        self._annotations = {}
+        self.trn_anno = {}
         self.s3_bucket = s3_bucket
         self.check_s3 = check_s3
         self.output_path = output_path
@@ -128,7 +130,7 @@ class DataFormatter(object):
         self._pickle_file = "{}.pickle".format('_'.join(path.split(os.sep)[5:]))
 
         if self._pickle_file and os.path.exists(self._pickle_file) and use_cache:
-            self._images, self._annotations = self.get_cache(self._pickle_file)
+            self._images, self.trn_anno = self.get_cache(self._pickle_file)
         else:
             ###------------------ Kache Logs Data Handler -----------------------###
             if self.input_format == Format.kache:
@@ -168,8 +170,12 @@ class DataFormatter(object):
                         img_key, uris2paths[uri] = self.load_training_img_uri(uri)
 
                         if img_data:
-                            time = img_data['time_readable'].split(' ')[3]
-                            hour = int(time.split(':')[0])
+                            if img_data.get('time_readable', None):
+                                readable_time = img_data['time_readable'].split(' ')[3]
+                            else:
+                                readable_time = self.format_from_nanos(int(img_data['time_nsec'])).split(' ')[3]
+
+                            hour = int(readable_time.split(':')[0])
                             if (hour > 4 and hour < 6) or (hour > 17 and hour < 19):
                                 timeofday = 'dawn/dusk'
                             elif hour > 6 and hour < 17:
@@ -181,12 +187,16 @@ class DataFormatter(object):
                             scene = 'highway'
                             timestamp = img_data['time_sec']
                             dataset_path = img_data['dataset_path']
+                            lat = img_data['latitude']
+                            long = img_data['longitude']
                         else:
                             vid_name = None
                             timeofday = 'daytime'
                             scene = 'highway'
                             timestamp = 10000
                             dataset_path = uris2paths[uri]
+                            lat = None
+                            long = None
 
 
                         im = Image.open(uris2paths[uri])
@@ -200,11 +210,11 @@ class DataFormatter(object):
                                                  'height': height,
                                                  'index': int(idx),
                                                  'timestamp': int(timestamp),
-                                                 'videoName': vid_name,
+                                                 'videoName':"", # vid_name,
                                                  'attributes': {'weather': 'clear', 'scene': scene, 'timeofday': timeofday},
                                                  'labels': []
                                                 }
-                        self._annotations[img_key] = []
+                        self.trn_anno[img_key] = []
 
                 self.generate_configs_for_inference()
                 print("DATA_CONFIG:", self.current_data_cfg_path)
@@ -238,7 +248,7 @@ class DataFormatter(object):
 
                         self._images[img_key]['labels'].append(label)
 
-                    self._annotations[img_key].extend(self._images[img_key]['labels'])
+                    self.trn_anno[img_key].extend(self._images[img_key]['labels'])
 
 
 
@@ -267,7 +277,7 @@ class DataFormatter(object):
                                                               'attributes': {'weather': 'clear',
                                                                              'scene': 'undefined',
                                                                              'timeofday': 'daytime'}}
-                            self._annotations[img_key] = []
+                            self.trn_anno[img_key] = []
 
 
 
@@ -288,10 +298,10 @@ class DataFormatter(object):
 
                     for ann in data:
                         fname = os.path.split(ann['url'])[-1]
-                        self._annotations[img_prefix+fname] = ann['labels']
+                        self.trn_anno[img_prefix+fname] = ann['labels']
                         img_data = self._images[img_prefix+fname]
                         img_data['attributes'] = ann['attributes']
-                        img_data['videoName'] = ann['videoName']
+                        img_data['videoName'] = "", #ann['videoName']
                         img_data['timestamp'] = ann['timestamp']
                         img_data['index'] = ann['index']
 
@@ -331,7 +341,7 @@ class DataFormatter(object):
                                                           'attributes': {'weather': 'clear',
                                                                          'scene': None,
                                                                          'timeofday': None}}
-                        self._annotations[img_key] = []
+                        self.trn_anno[img_key] = []
 
                         for ann in [l for l in data['annotations'] if int(l['image_id']) == idx]:
                             label = {}
@@ -356,10 +366,10 @@ class DataFormatter(object):
                             label['box3d'] = None
                             label['poly2d'] = None
                             label['box2d'] = {'x1': "%.3f" % round(float(ann['bbox'][0]),3), 'y1': "%.3f" % round(float(ann['bbox'][1]),3),
-                                             'x2':  "%.3f" % round(float(ann['bbox'][0]+ann['bbox'][2]),3) , 'y2': "%.3f" % round(float(ann['bbox'][1]+ ann['bbox'][3]),3)}
+                                             'x2':  "%.3f" % round(float(ann['bbox'][0]-1+ann['bbox'][2]),3) , 'y2': "%.3f" % round(float(ann['bbox'][1]-1+ ann['bbox'][3]),3)}
                             self._images[img_key]['labels'].append(label)
                             ann_idx +=1
-                        self._annotations[img_key].extend(self._images[img_key]['labels'])
+                        self.trn_anno[img_key].extend(self._images[img_key]['labels'])
 
 
 
@@ -385,22 +395,25 @@ class DataFormatter(object):
                         width, height = im.size
                         if self.s3_bucket: img_uri = self.send_to_s3(img_uri.replace(trainer_prefix,''))
 
+                        # Get GPS Coords
+                        lat, long = self.get_gps_coords(img_label_name)
+
 
                         if img_label.get('attributes', None):
                             self._images[img_key] = {'url': img_uri, 'name': img_uri, 'coco_path': os.path.join(self.coco_images_dir, self.trainer_prefix.split('_')[1], img_key),
                                                               'width': width, 'height': height, 'labels': [],
-                                                              'index': idx, 'timestamp': 10000,
-                                                              'videoName': BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0]),
+                                                              'index': idx, 'timestamp': 10000, 'latitude':lat, 'longitude': long,
+                                                              'videoName': "", #BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0]),
                                                               'attributes': {'weather': img_label['attributes']['weather'],
                                                                              'scene': img_label['attributes']['scene'],
                                                                              'timeofday': img_label['attributes']['timeofday']}}
                         else:
                             self._images[img_key] = {'url': img_uri, 'name': img_uri, 'coco_path': os.path.join(self.coco_images_dir, self.trainer_prefix.split('_')[1], img_key),
                                                               'width': width, 'height': height, 'labels': [],
-                                                              'index': idx, 'timestamp': 10000,
-                                                              'videoName': BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0])}
+                                                              'index': idx, 'timestamp': 10000, 'latitude':lat, 'longitude': long,
+                                                              'videoName':""} # BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0])}
 
-                        self._annotations[img_key] = []
+                        self.trn_anno[img_key] = []
                         if img_label.get('labels', None):
                             for ann in [l for l in img_label['labels']]:
                                 label = {}
@@ -436,7 +449,7 @@ class DataFormatter(object):
                                         ann['attributes']['Traffic Light Color'] == label['attributes']['Traffic Light Color']
                                 self._images[img_key]['labels'].append(label)
                                 ann_idx +=1
-                            self._annotations[img_key].extend(self._images[img_key]['labels'])
+                            self.trn_anno[img_key].extend(self._images[img_key]['labels'])
 
 
 
@@ -479,7 +492,7 @@ class DataFormatter(object):
                                          'scene': 'highway',
                                          'timeofday': 'night'}
                     self._images[img_prefix+fname] = img
-                    self._annotations[img_prefix+fname] = []
+                    self.trn_anno[img_prefix+fname] = []
 
                     for annotation in [x for x in vgg_annotations.as_matrix() if x[0].lower() == img_url.lower()]:
                         ann = {}
@@ -503,9 +516,9 @@ class DataFormatter(object):
                                 d['width'] = 1.0
 
                             ann['box2d'] = {'x1': d['x'],
-                                            'x2': d['x'] + d['width'],
+                                            'x2': d['x']-1 + d['width'],
                                             'y1': d['y'],
-                                            'y2': d['y'] + d['height']}
+                                            'y2': d['y']-1 + d['height']}
 
 
                         cls = ast.literal_eval(annotation[6])
@@ -538,14 +551,14 @@ class DataFormatter(object):
 
                         img['labels'].append(ann)
                         ann_idx += 1
-                    self._annotations[img_prefix+fname].extend(img['labels'])
+                    self.trn_anno[img_prefix+fname].extend(img['labels'])
 
 
             # Convert attributes to Categories
             self.attributes_to_cats('trafficLightColor')
 
             # Save object to picklefile
-            pickle_dict = {'images':self._images,'annotations':self._annotations}
+            pickle_dict = {'images':self._images,'annotations':self.trn_anno}
             print('Saving to Pickle File:', self._pickle_file)
             with open(self._pickle_file,"wb") as pickle_out:
                 pickle.dump(pickle_dict, pickle_out)
@@ -580,10 +593,41 @@ class DataFormatter(object):
                                 label['category'] = 'traffic light'
 
                         # Update corresponding annotation
-                        for ann in self._annotations[fname]:
+                        for ann in self.trn_anno[fname]:
                             if ann['id'] == label['id']:
                                 # overwrite annotation with new label
                                 ann = label
+
+    def get_gps_coords(self, fname):
+        train_type = 'train'
+        lat, long = (None, None)
+        if 'val' in self.trainer_prefix and 'train' not in self.trainer_prefix:
+            train_type  = 'val'
+
+        if self.input_format == Format.bdd and 'bdd100k' in self.s3_bucket:
+            finfo = Path(SOURCE_BDD100K_DIR, "info/100k", train_type, "{}.json".format(os.path.splitext(fname)[0]))
+            if finfo.exists():
+                img_info = json.load(finfo.open())
+                if img_info:
+                    if img_info.get('gps', None):
+                        seq_timestamp = int(img_info['gps'][0]['timestamp'])
+
+                        for gps_info in img_info['gps']:
+                            if int(gps_info['timestamp']) == seq_timestamp+10000: # Found frame used in training seq_timestamp
+                                lat = float(gps_info['latitude'])
+                                long = float(gps_info['longitude'])
+                                return (lat,long)
+                    elif img_info.get('locations', None):
+                        seq_timestamp = int(img_info['locations'][0]['timestamp'])
+
+                        for gps_info in img_info['locations']:
+                            if int(gps_info['timestamp']) == seq_timestamp+10000: # Found frame used in training seq_timestamp
+                                lat = float(gps_info['latitude'])
+                                long = float(gps_info['longitude'])
+                                return (lat,long)
+
+        return (lat, long)
+
 
 
 
@@ -690,7 +734,7 @@ class DataFormatter(object):
         for fname in merging_set._images.keys():
             delete_marker = True
 
-            for  ann in merging_set._annotations[fname]:
+            for  ann in merging_set.trn_anno[fname]:
                 ## Only include images with annotations corresponding to this category_id
                 if ann['category'].replace(' ', '').lower() in include:
                     delete_marker = False
@@ -701,7 +745,7 @@ class DataFormatter(object):
 
         for fname in deletions:
             merging_set._images.pop(fname)
-            merging_set._annotations.pop(fname)
+            merging_set.trn_anno.pop(fname)
 
 
         ## Exclude block ##
@@ -715,7 +759,7 @@ class DataFormatter(object):
         # If any categories in exclude, remove any image associated with categories.
         for fname in merging_set._images.keys():
             delete_marker = False
-            for  ann in merging_set._annotations[fname]:
+            for  ann in merging_set.trn_anno[fname]:
                 ## Exclude images with annotations corresponding to this category_id
                 if ann['category'].replace(' ', '').lower() in exclude:
                     delete_marker = True
@@ -731,14 +775,14 @@ class DataFormatter(object):
         # Prune Images
         for fname in deletions:
             merging_set._images.pop(fname)
-            merging_set._annotations.pop(fname)
+            merging_set.trn_anno.pop(fname)
 
         # Prune annotations
         if reject_new_categories:
             for fname in merging_set._images.keys():
                 for ann in ann_deletions:
-                    if merging_set._annotations.get(fname, None) and ann in merging_set._annotations[fname]:
-                        merging_set._annotations[fname].remove(ann)
+                    if merging_set.trn_anno.get(fname, None) and ann in merging_set.trn_anno[fname]:
+                        merging_set.trn_anno[fname].remove(ann)
                     if merging_set._images.get(fname, None) and ann in merging_set._images[fname]['labels']:
                         merging_set._images[fname]['labels'].remove(ann)
 
@@ -746,13 +790,13 @@ class DataFormatter(object):
         # Merge Dataset
         for img_key in merging_set._images.keys():
             self._images[img_key] = merging_set._images[img_key]
-            self._annotations[img_key] = merging_set._annotations[img_key]
+            self.trn_anno[img_key] = merging_set.trn_anno[img_key]
 
         if len( merging_set._images) > 0:
             merge_len = len(merging_set._images)
             merge_ann_len = 0
-            for x in merging_set._annotations.keys():
-                merge_ann_len+=len(merging_set._annotations[x])
+            for x in merging_set.trn_anno.keys():
+                merge_ann_len+=len(merging_set.trn_anno[x])
 
             print('Successfully merged', merge_len, 'images | and ', merge_ann_len, 'annotations')
         else:
@@ -763,7 +807,7 @@ class DataFormatter(object):
         self.show_data_distribution()
 
         # Save object to picklefile
-        pickle_dict = {'images':self._images,'annotations':self._annotations}
+        pickle_dict = {'images':self._images,'annotations':self.trn_anno}
         print('Saving to Pickle File:', self._pickle_file)
         with open(self._pickle_file,"wb") as pickle_out:
             pickle.dump(pickle_dict, pickle_out)
@@ -938,7 +982,7 @@ class DataFormatter(object):
                 for category in self.category_names:
                     writer.write('- name: '+category+'\n')
         else:
-            anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
+            anns = [i for i in [d for d in [ann for ann in self.trn_anno.values()]]]
             cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
             categories = []
             [categories.extend(cat) for cat in cats]
@@ -949,6 +993,10 @@ class DataFormatter(object):
                     writer.write('- name: '+category+'\n')
 
 
+
+    def format_from_nanos(self, nanos):
+        dt = datetime.datetime.fromtimestamp(nanos / 1e9)
+        return '{}{:03.0f}'.format(dt.strftime('%Y-%m-%dT%H:%M:%S.%f'), nanos % 1e3)
 
 
     def path_leaf(self, path):
@@ -962,9 +1010,9 @@ class DataFormatter(object):
     def convert_anns_to_coco(self):
         images, anns = [], []
         start_idx, ann_index = int(1e7), int(1e7)
-        self.num_imgs = len(self._annotations.keys())
+        self.num_imgs = len(self.trn_anno.keys())
 
-        for img_id, fname in enumerate(self._annotations.keys(), start=start_idx):
+        for img_id, fname in enumerate(self.trn_anno.keys(), start=start_idx):
             width, height = self._images[fname]['width'], self._images[fname]['height']
             fname = self.path_leaf(fname)
             if not fname.startswith(self.trainer_prefix):
@@ -972,11 +1020,11 @@ class DataFormatter(object):
             dic = {'file_name': fname, 'id': img_id, 'height': height, 'width': width}
             images.append(dic)
 
-            for annotation in [x for x in self._annotations[fname] if x['category'] in self.category_names and x['box2d']]:
-                bbox = annotation['box2d']
+            for annotation in [x for x in self.trn_anno[fname] if x['category'] in self.category_names and x['box2d']]:
+                bb = annotation['box2d']
 
-                if bbox:
-                    xstart, ystart, xstop, ystop = float(bbox['x1']),float(bbox['y1']),float(bbox['x2']),float(bbox['y2'])
+                if bb:
+                    xstart, ystart, xstop, ystop = float(bb['x1']),float(bb['y1']),float(bb['x2']),float(bb['y2'])
 
                     if xstart < 0: xstart = 0.0
                     if ystart < 0: ystart = 0.0
@@ -994,7 +1042,7 @@ class DataFormatter(object):
                     segmentations.append([])
                     width = xstop - xstart
                     height = ystop - ystart
-                    bbox = (xstart, ystart, width, height)
+                    bb = (xstart, ystart, width, height)
                     area = float(width*height)
 
                     annotation = {
@@ -1003,7 +1051,7 @@ class DataFormatter(object):
                         'image_id': img_id,
                         'category_id': self.cats2ids[annotation['category']],
                         'id': ann_index,
-                        'bbox': bbox,
+                        'bbox': bb,
                         'area': area
                     }
                     ann_index+=1
@@ -1016,7 +1064,7 @@ class DataFormatter(object):
                 cats = [x.strip('\n') for x in reader]
                 self.category_names =  set(cats)
         else:
-            anns = [i for i in [d for d in [ann for ann in self._annotations.values()]]]
+            anns = [i for i in [d for d in [ann for ann in self.trn_anno.values()]]]
             cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
             categories = []
             [categories.extend(cat) for cat in cats]
@@ -1117,7 +1165,7 @@ class DataFormatter(object):
             yolo_converter = os.path.join(os.path.abspath(val_par_path), 'convert2Yolo/example.py')
         else:
             # yolo_converter = os.path.join(os.path.abspath(par_path),'darknet', 'convert2Yolo/example.py')
-            yolo_converter = os.path.join('/media/dean/datastore/datasets/darknet', 'convert2Yolo/example.py')
+            yolo_converter = os.path.join('/media/dean/datastore1/datasets/darknet', 'convert2Yolo/example.py')
 
         os.makedirs(os.path.abspath(os.path.join(darknet_conversion_results, os.pardir)), exist_ok = True)
         if not os.path.exists(darknet_conversion_results):
@@ -1152,7 +1200,7 @@ class DataFormatter(object):
                         self.darknet_manifast = os.path.join(self.coco_labels_dir, 'manifast.txt')
                     self.convert_coco_to_yolo()
 
-        elif format == Format.scalabel or format == Format.bdd:
+        elif format == Format.scalabel:
             os.makedirs(os.path.join(self.output_path, 'bdd100k', 'annotations'), 0o755 , exist_ok = True )
             self.bdd100k_annotations = os.path.join(self.output_path, 'bdd100k', 'annotations/bdd100k_altered_annotations.json')
             self.generate_names_yml()
@@ -1161,12 +1209,46 @@ class DataFormatter(object):
                 os.remove(self.bdd100k_annotations)
             except OSError: pass
 
-            if paginate:
+            if paginate: # Prepare for Scalabel
                 img_data = list(self._images.values())
-                for i, chunk in enumerate(self.data_grouper(self._images.values(), 5000)):
-                    with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
-                        json.dump(list(chunk), output_json_file)
-            else:
-                with open(self.bdd100k_annotations, "w+") as output_json_file:
-                    imgs_list = list(self._images.values())
-                    json.dump(imgs_list, output_json_file)
+                for i, chunk in enumerate(self.data_grouper(self._images.values(), 50)):
+                    tmp =sorted(list(copy.deepcopy(chunk)), key=itemgetter('index'))
+                    lblidx = 0
+                    for tmpidx, d in enumerate(tmp):
+                        if d: # Reset index
+                            tmp[tmpidx]['scalabel_id'] = tmpidx
+                            tmp[tmpidx]['kache_id'] = int(tmp[tmpidx]['index'])
+                            tmp[tmpidx]['index'] = tmpidx
+                            # Reset Label ids
+                            if d['labels']:
+                                #tmp_lst = [x for x in d['labels'] if not x['category'] in EXCLUDE_CATS]
+                                #tmp[tmpidx]['labels'] = tmp_lst
+                                for ii, lbl in enumerate(tmp[tmpidx]['labels']):
+                                    tmp[tmpidx]['labels'][ii]['scalabel_label_id'] = lblidx
+                                    tmp[tmpidx]['labels'][ii]['kache_label_id'] = int(tmp[tmpidx]['labels'][ii]['id'])
+                                    tmp[tmpidx]['labels'][ii]['id'] = lblidx
+                                    lblidx+=1
+
+
+                    data = json.dumps(tmp, indent=4)
+                    with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+", encoding='utf-8') as output_json_file:
+                        output_json_file.write(data)
+
+        elif format == Format.bdd:
+                    os.makedirs(os.path.join(self.output_path, 'bdd100k', 'annotations'), 0o755 , exist_ok = True )
+                    self.bdd100k_annotations = os.path.join(self.output_path, 'bdd100k', 'annotations/bdd100k_altered_annotations.json')
+                    self.generate_names_yml()
+
+                    try:
+                        os.remove(self.bdd100k_annotations)
+                    except OSError: pass
+
+                    if paginate:
+                        img_data = list(self._images.values())
+                        for i, chunk in enumerate(self.data_grouper(self._images.values(), 200)):
+                            with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
+                                json.dump(list(chunk), output_json_file)
+                    else:
+                        with open(self.bdd100k_annotations, "w+") as output_json_file:
+                            imgs_list = list(self._images.values())
+                            json.dump(imgs_list, output_json_file)
