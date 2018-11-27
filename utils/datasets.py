@@ -62,9 +62,9 @@ SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore1/datasets/kache_ai', 'fr
 # BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet', 'cfg', 'bdd100k.data')
 # BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
 # Use new config setup #
-ANNOTATION_MODEL =  "/media/dean/datastore1/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights"
-BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'bdd100k.data')
-BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/', 'cfg', 'yolov3-bdd100k.cfg')
+ANNOTATION_MODEL =  "/media/dean/datastore1/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/backup/yolov3-bdd100k_51418.weights"
+BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/', 'cfg', 'bdd100k.data')
+BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/', 'cfg', 'yolov3-bdd100k.cfg')
 STATIC_NAMES_CONFIG = '/media/dean/datastore1/datasets/darknet/data/cfg/COCO_train2014_0000.names'
 STATIC_NAMES_CONFIG_YML = '/media/dean/datastore1/datasets/darknet/data/cfg/kache_category_names.yml'
 
@@ -210,7 +210,7 @@ class DataFormatter(object):
                                                  'height': height,
                                                  'index': int(idx),
                                                  'timestamp': int(timestamp),
-                                                 'videoName':"", # vid_name,
+                                                 'videoName':vid_name,
                                                  'attributes': {'weather': 'clear', 'scene': scene, 'timeofday': timeofday},
                                                  'labels': []
                                                 }
@@ -280,18 +280,6 @@ class DataFormatter(object):
                             self.trn_anno[img_key] = []
 
 
-
-                            fname = os.path.split(img_url)[-1]
-                            full_path = self.maybe_download(img_url, img_prefix+fname)
-                            if s3_bucket:
-                                self.send_to_s3(os.path.join(DARKNET_TRAINING_DIR, img_prefix+fname))
-
-                            im = Image.open(full_path)
-                            width, height = im.size
-                            self._images[img_prefix+fname] = {'url': img_url, 'coco_path': full_path,
-                                                 'width': width, 'height': height}
-
-
                 # Import Labels
                 with open(annotations_list, 'r') as f:
                     data = json.load(f)
@@ -301,7 +289,7 @@ class DataFormatter(object):
                         self.trn_anno[img_prefix+fname] = ann['labels']
                         img_data = self._images[img_prefix+fname]
                         img_data['attributes'] = ann['attributes']
-                        img_data['videoName'] = "", #ann['videoName']
+                        img_data['videoName'] = ann['videoName']
                         img_data['timestamp'] = ann['timestamp']
                         img_data['index'] = ann['index']
 
@@ -338,6 +326,7 @@ class DataFormatter(object):
                                                           'width': width, 'height': height, 'labels': [],
                                                           'index': idx, 'timestamp': 10000,
                                                           'videoName': '',
+                                                          'scalabel_id':idx,'kache_id': idx,
                                                           'attributes': {'weather': 'clear',
                                                                          'scene': None,
                                                                          'timeofday': None}}
@@ -346,6 +335,8 @@ class DataFormatter(object):
                         for ann in [l for l in data['annotations'] if int(l['image_id']) == idx]:
                             label = {}
                             label['id'] = ann['id']
+                            label['scalabel_label_id'] = int(ann['id'])
+                            label['kache_label_id'] = int(ann['id'])
                             label['attributes'] = {'Occluded':False,
                                                    'Truncated': False,
                                                    'Traffic Light Color': [0, 'NA']}
@@ -403,21 +394,25 @@ class DataFormatter(object):
                             self._images[img_key] = {'url': img_uri, 'name': img_uri, 'coco_path': os.path.join(self.coco_images_dir, self.trainer_prefix.split('_')[1], img_key),
                                                               'width': width, 'height': height, 'labels': [],
                                                               'index': idx, 'timestamp': 10000, 'latitude':lat, 'longitude': long,
-                                                              'videoName': "", #BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0]),
+                                                              'videoName': BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0]),
                                                               'attributes': {'weather': img_label['attributes']['weather'],
                                                                              'scene': img_label['attributes']['scene'],
-                                                                             'timeofday': img_label['attributes']['timeofday']}}
+                                                                             'timeofday': img_label['attributes']['timeofday']},
+                                                               'scalabel_id':idx,'kache_id': idx}
                         else:
                             self._images[img_key] = {'url': img_uri, 'name': img_uri, 'coco_path': os.path.join(self.coco_images_dir, self.trainer_prefix.split('_')[1], img_key),
                                                               'width': width, 'height': height, 'labels': [],
                                                               'index': idx, 'timestamp': 10000, 'latitude':lat, 'longitude': long,
-                                                              'videoName':""} # BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0])}
+                                                              'videoName': BDD100K_VIDEOS_PATH+"{}.mov".format(os.path.splitext(img_label['name'])[0]),
+                                                              'scalabel_id':idx,'kache_id': idx}
 
                         self.trn_anno[img_key] = []
                         if img_label.get('labels', None):
                             for ann in [l for l in img_label['labels']]:
                                 label = {}
                                 label['id'] = int(ann_idx)
+                                label['scalabel_label_id'] = int(ann_idx)
+                                label['kache_label_id'] = int(ann_idx)
                                 label['attributes'] = ann.get('attributes', None)
                                 if ann.get('attributes', None):
                                     label['attributes'] = {'Occluded': ann['attributes'].get('occluded', False),
@@ -454,106 +449,6 @@ class DataFormatter(object):
 
 
 
-
-            ###------------------ VGG Data Handler-(Legacy Labeler) -----------------------###
-            elif self.input_format == Format.vgg:
-                HEADER_ROW=['filename', 'file_size', 'file_attributes', 'region_count',
-                            'region_id', 'region_shape_attributes', 'region_attributes']
-                vgg_annotations = pd.read_csv(annotations_list, names=HEADER_ROW, skiprows=1)
-                img_paths = sorted(set(vgg_annotations['filename'].tolist()))
-                num_imgs = len(img_paths)
-                ann_idx = 0
-
-                ## Verify Labels ##
-
-                # loop through each image
-                urlstofilepaths = {}
-                start_idx = int(1e6)
-                for idx, img_url in enumerate(img_paths, start=start_idx):
-                    img = {}
-                    # Download Image if not exist
-                    fname = '_'.join(img_url.split('/')[-2:])
-                    urlstofilepaths[img_url] = maybe_download(img_url, os.path.join(DARKNET_TRAINING_DIR, img_prefix+fname))
-                    # Get Image Size in Bytes
-                    img_file_size =  os.stat(urlstofilepaths[img_url]).st_size
-
-                    if s3_bucket:
-                        img_url = self.send_to_s3(urlstofilepaths[img_url])
-
-
-                    img['name'] = img_prefix+fname
-                    img['url'] = img_url
-                    img['videoName'] = ''
-                    img['file_size'] = img_file_size
-                    img['index'] = idx
-                    img['timestamp'] = 10000
-                    img['labels'] = []
-                    img['attributes'] = {'weather': 'clear',
-                                         'scene': 'highway',
-                                         'timeofday': 'night'}
-                    self._images[img_prefix+fname] = img
-                    self.trn_anno[img_prefix+fname] = []
-
-                    for annotation in [x for x in vgg_annotations.as_matrix() if x[0].lower() == img_url.lower()]:
-                        ann = {}
-                        ann['id'] = ann_idx
-                        ann['attributes'] = {'Occluded': False, 'Truncated': False}
-                        ann['manual'] = True
-                        ann['poly2d'] = None
-                        ann['box3d'] = None
-                        ann['box2d'] = None
-                        d = ast.literal_eval(annotation[5])
-
-                        if d:
-                            if float(d['x']) < 0.0:
-                                d['x'] = 0.0
-                            if float(d['y']) < 0.0:
-                                d['y'] = 0.0
-                            if float(d['height']) <= 0.0:
-                                d['height'] = 1.0
-
-                            if float(d['width']) <= 0.0:
-                                d['width'] = 1.0
-
-                            ann['box2d'] = {'x1': d['x'],
-                                            'x2': d['x']-1 + d['width'],
-                                            'y1': d['y'],
-                                            'y2': d['y']-1 + d['height']}
-
-
-                        cls = ast.literal_eval(annotation[6])
-                        cat = None
-                        if cls:
-                            cat = cls['type'].lower().strip()
-                        if not cat or cat == '' or cat == 'fire hydrant':
-                            continue
-                        elif cat == 'tlr':
-                            ann['attributes']['Traffic Light Color'] = [3, 'R']
-                            ann['category'] = 'traffic light'
-                        elif cat == 'tlg':
-                            ann['attributes']['Traffic Light Color'] = [1, 'G']
-                            ann['category'] = 'traffic light'
-                        elif cat == 'tla':
-                            ann['attributes']['Traffic Light Color'] = [2, 'Y']
-                            ann['category'] = 'traffic light'
-                        elif cat == 'tlna' or cat == 'traffic light':
-                            ann['attributes']['Traffic Light Color'] = [0, 'NA']
-                            ann['category'] = 'traffic light'
-                        elif cat == 'motorbike':
-                            ann['category'] = 'motor bike'
-                        elif cat == 'speedlimitsign' or cat == 'stop sign' or cat == 'cone' or cat == 'clock':
-                            cat = 'traffic sign'
-                        elif cat not in category_names:
-                            continue
-                        else: # Verify category exists
-                            ann['category'] =  ids2cats[cats2ids[cat]]
-
-
-                        img['labels'].append(ann)
-                        ann_idx += 1
-                    self.trn_anno[img_prefix+fname].extend(img['labels'])
-
-
             # Convert attributes to Categories
             self.attributes_to_cats('trafficLightColor')
 
@@ -572,11 +467,11 @@ class DataFormatter(object):
                 if self._images[fname].get('labels', None):
                     for label in [l for l in  self._images[fname]['labels'] if l['category'] == 'traffic light' and l.get('attributes', None)]:
                         if label['attributes'].get('trafficLightColor', None):
-                            if label['attributes']['trafficLightColor'].lower() == 'green':
+                            if label['attributes']['trafficLightColor'][1].lower() == 'green':
                                 label['category'] = 'traffic light-green'
-                            elif label['attributes']['trafficLightColor'].lower() == 'yellow':
+                            elif label['attributes']['trafficLightColor'][1].lower() == 'yellow':
                                 label['category'] = 'traffic light-amber'
-                            elif label['attributes']['trafficLightColor'].lower() == 'red':
+                            elif label['attributes']['trafficLightColor'][1].lower() == 'red':
                                 label['category'] = 'traffic light-red'
                             else:
                                 label['category'] = 'traffic light'
@@ -736,7 +631,7 @@ class DataFormatter(object):
 
             for  ann in merging_set.trn_anno[fname]:
                 ## Only include images with annotations corresponding to this category_id
-                if ann['category'].replace(' ', '').lower() in include:
+                if ann['category'].replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() in include:
                     delete_marker = False
                     break
 
@@ -1211,12 +1106,13 @@ class DataFormatter(object):
 
             if paginate: # Prepare for Scalabel
                 img_data = list(self._images.values())
-                for i, chunk in enumerate(self.data_grouper(self._images.values(), 50)):
+                for i, chunk in enumerate(self.data_grouper(self._images.values(), 1000)):
                     tmp =sorted(list(copy.deepcopy(chunk)), key=itemgetter('index'))
                     lblidx = 0
                     for tmpidx, d in enumerate(tmp):
                         if d: # Reset index
                             tmp[tmpidx]['scalabel_id'] = tmpidx
+                            tmp[tmpidx]['videoName'] = "" # Scalabel bug, tmp fix for noew
                             tmp[tmpidx]['kache_id'] = int(tmp[tmpidx]['index'])
                             tmp[tmpidx]['index'] = tmpidx
                             # Reset Label ids
@@ -1233,6 +1129,10 @@ class DataFormatter(object):
                     data = json.dumps(tmp, indent=4)
                     with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+", encoding='utf-8') as output_json_file:
                         output_json_file.write(data)
+            else:
+                with open(self.bdd100k_annotations, "w+") as output_json_file:
+                    imgs_list = list(self._images.values())
+                    json.dump(imgs_list, output_json_file)
 
         elif format == Format.bdd:
                     os.makedirs(os.path.join(self.output_path, 'bdd100k', 'annotations'), 0o755 , exist_ok = True )
@@ -1245,7 +1145,7 @@ class DataFormatter(object):
 
                     if paginate:
                         img_data = list(self._images.values())
-                        for i, chunk in enumerate(self.data_grouper(self._images.values(), 200)):
+                        for i, chunk in enumerate(self.data_grouper(self._images.values(), 1000)):
                             with open('{}_{}.json'.format(os.path.splitext(self.bdd100k_annotations)[0],i), "w+") as output_json_file:
                                 json.dump(list(chunk), output_json_file)
                     else:
