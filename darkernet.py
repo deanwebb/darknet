@@ -187,7 +187,7 @@ class Darkernet():
                 [writer.write(str(k)+'='+str(v)+'\n') for k,v in data_config.items()]
         return path
 
-    def generate_anchors(self, clusters = 9, width = 416, height = 416):
+    def generate_anchors(self, clusters = 15, width = 416, height = 416):
         gen_anchors_cmd = "cd {} && ./darknet detector calc_anchors {} \
         -num_of_clusters {} -width {} -height {} > {}".format(self.current_working_dir, self.current_data_cfg_path, clusters, width, height, 'anchor_results.txt')
         print('Calculating Anchors from dataset distribution...')
@@ -221,12 +221,13 @@ class Darkernet():
                 else:
                     block['classes'] = len(self.dataset.category_names)
                     block['anchors'] = self.anchors
+                    block['num'] = 15 # Number of dimentionality clusters
                     model_config[i-1]['filters'] = (len(self.dataset.category_names)+5)*3
             elif block['type'] == '':
                 num_layers += 1
 
             # TODO: Freeze layers #
-            layers_to_unfreeze = hyperparams['stopbackwards']
+            layers_to_freeze = hyperparams['stopbackwards']
 
         return model_config
 
@@ -398,7 +399,7 @@ class Darkernet():
                 self.current_weights =  os.path.join(self.current_training_dir, 'backup', 'darknet53.conv.74')
 
             self.num_gpus = self.current_data_cfg['gpus']
-            self.darknet_train_cmd = "cd {} && ./darknet detector train {} {} {} -gpus {} | tee -a {}".format(self.current_working_dir,
+            self.darknet_train_cmd = "cd {} && ./darknet detector train {} {} {} -gpus {} -dont_show | tee -a {}".format(self.current_working_dir,
                                         self.current_data_cfg_path, self.current_model_cfg_path, self.current_weights, self.num_gpus,
                                         self.current_training_results)
             print('Initializing Training with the following parameters:','\n', self.darknet_train_cmd)
