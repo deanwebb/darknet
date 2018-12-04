@@ -165,24 +165,27 @@ def annotate(image_dir, cfg_path, weights_path, data_cfg_pth, detection_threshol
                 #print('DETECTION:', detection)
                 d = {}
                 d['category'] = detection[0].decode("utf-8")
-                # Convert (x_center, y_center) to (x1, y1)
-                new_y = float(detection[2][1]) - .5 * float(detection[2][3])
-                new_x = float(detection[2][0]) - .5 * float(detection[2][2])
+                # Rescale back to original image Size
+                new_y = float( detection[2][1]) - .5 * float(detection[2][3]) #corrects for y offset
+                new_x = float(detection[2][0]) - .5 * float(detection[2][2]) #corrects for x offset
 
                 corrected_detection = [ new_x, new_y, detection[2][2], detection[2][3]]
                 d['box2d'] = {'x1': float(corrected_detection[0]),
                               'y1':float(corrected_detection[1]) ,
-                              'x2': float(corrected_detection[0]) + float(corrected_detection[2]-1) ,
-                              'y2': float(corrected_detection[1]) + float(corrected_detection[3])-1}
-                d['manualShape'] = False
+                              'x2': float(corrected_detection[0])-1 + float(corrected_detection[2]) ,
+                              'y2': float(corrected_detection[1])-1 + float(corrected_detection[3])}
+                d['manualAttributes'] = False
+                d['manual'] = False
 
                 if float(detection[1]) >= detection_threshold:
                     anns.append(d)
             all_anns.append((fname, anns))
+        elif fname.endswith(".png"):
+            print( 'Found PNG')
     return all_anns
 
 if __name__ == "__main__":
-    image_dir = os.path.join('/media/dean/datastore1/datasets/kache_ai', 'frames_dev')
+    image_dir = os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames_dev')
     cfg_path = "trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/yolov3-bdd100k.cfg",
     weights_path = "trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/backup/yolov3-bdd100k_final.weights",
     data_cfg_path = "trainers/20181019--bdd-coco-ppl_1gpu_0001lr_256bat_32sd_90ep/cfg/bdd100k.data"

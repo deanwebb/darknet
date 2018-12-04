@@ -4,6 +4,7 @@ import urllib
 from PIL import Image
 from enum import Enum
 from pycocotools.coco import COCO
+from ruamel.yaml import YAML
 
 import xml.etree.cElementTree as ET
 import glob
@@ -37,7 +38,9 @@ from functools import wraps
 import http
 from pathlib import Path
 import copy
+import sys
 from operator import itemgetter
+from collections import defaultdict
 
 class Format(Enum):
     scalabel = 0
@@ -49,24 +52,38 @@ class Format(Enum):
     open_imgs = 6
 
 DEFAULT_IMG_EXTENSION = '.jpg'
+#DEFAULT_IMG_EXTENSION = '.png'
 EXCLUDE_CATS = ['lane', 'drivable area']
-BASE_DIR = '/media/dean/datastore1/datasets/BerkeleyDeepDrive/'
+BASE_DIR = '/media/dean/datastore/datasets/BerkeleyDeepDrive/'
 SOURCE_BDD100K_DIR = os.path.join(BASE_DIR, 'bdd100k')
-SOURCE_COCO_DIR = '/media/dean/datastore1/datasets/road_coco/darknet/data/coco/'
-SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore1/datasets/kache_ai', 'frames')
+SOURCE_COCO_DIR = '/media/dean/datastore/datasets/road_coco/darknet/data/coco/'
+SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'frames_dev/kache_set')
 
 ## Use old config setup #
-# STATIC_NAMES_CONFIG = '/media/dean/datastore1/datasets/kache_ai/static_cfg/static.names'
-# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore1/datasets/kache_ai/static_cfg/static.yml'
-# ANNOTATION_MODEL =  "/media/dean/datastore1/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
-# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet', 'cfg', 'bdd100k.data')
-# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
-# Use new config setup #
-ANNOTATION_MODEL =  "/media/dean/datastore1/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/backup/yolov3-bdd100k_51418.weights"
-BASE_DATA_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/', 'cfg', 'bdd100k.data')
-BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore1/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/', 'cfg', 'yolov3-bdd100k.cfg')
-STATIC_NAMES_CONFIG = '/media/dean/datastore1/datasets/darknet/data/cfg/COCO_train2014_0000.names'
-STATIC_NAMES_CONFIG_YML = '/media/dean/datastore1/datasets/darknet/data/cfg/kache_category_names.yml'
+# STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/kache_ai/static_cfg/static.names'
+# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/kache_ai/static_cfg/static.yml'
+# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/backup/yolov3-bdd100k_51418.weights"
+# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'bdd100k.data')
+# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet', 'cfg', 'yolov3-bdd100k.cfg')
+# # Use new config setup #
+# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/backup/yolov3-bdd100k_51418.weights"
+# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/', 'cfg', 'bdd100k.data')
+# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181111--Testing-4trafficlightcats_1gpu_001lr_64bat_16sd_1020ep_2sb/', 'cfg', 'yolov3-bdd100k.cfg')
+# STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/cfg/COCO_train2014_0000.names'
+# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/darknet/data/cfg/kache_category_names.yml'
+
+# # # Use crude detector config setup #
+# ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/20181201--construction-zones_1gpu_00003lr_32bat_16sd_100ep_4sb/backup/yolov3-bdd100k_68856.weights"
+# BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181201--construction-zones_1gpu_00003lr_32bat_16sd_100ep_4sb/', 'cfg', 'bdd100k.data')
+# BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/20181201--construction-zones_1gpu_00003lr_32bat_16sd_100ep_4sb/', 'cfg', 'yolov3-bdd100k.cfg')
+# STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/cfg/COCO_train2014_0000.names'
+# STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/darknet/data/cfg/kache_category_names.yml'
+
+ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/backup/yolov3-bdd100k_4300.weights"
+BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/', 'cfg', 'bdd100k.data')
+BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/', 'cfg', 'yolov3-bdd100k.cfg')
+STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/cfg/COCO_train2014_0000.names'
+STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/darknet/data/cfg/kache_category_names.yml'
 
 '''
 Current Categories
@@ -99,11 +116,12 @@ Current Categories
 class DataFormatter(object):
     def __init__(self, annotations_list, s3_bucket = None, check_s3 = False,
                     input_format=Format.scalabel, output_path=os.getcwd(), pickle_file = None,
-                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None, image_list = None, use_cache = False, use_static_categories = False):
+                    trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None,
+                    image_list = None, use_cache = False, use_static_categories = False, convert_attributes = True):
 
         self.input_format = input_format
-        self._images = {}
-        self.trn_anno = {}
+        self._images = OrderedDict()
+        self.trn_anno = OrderedDict()
         self.s3_bucket = s3_bucket
         self.check_s3 = check_s3
         self.output_path = output_path
@@ -152,19 +170,31 @@ class DataFormatter(object):
                 else:
                     self.input_imgs_dir = os.path.split(annotations_list)[0]
 
-                imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
+                # imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
+                #
+                # uris2paths = {}
+                # uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
+                # for idx, uri in uris:
+                #     if os.path.isfile(uri) and DEFAULT_IMG_EXTENSION in str(uri):
+                #         print(uri)
 
-                uris2paths = {}
-                uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
-                for idx, uri in uris:
-                    if os.path.isfile(uri) and DEFAULT_IMG_EXTENSION in str(uri):
 
-                        img_data = None
-                        for bag, frame in ((x1, x2) for x1 in self.kache_ai_logs for x2 in x1[1]['frames']):
-                            if frame['hash_key'] == self.path_leaf(uri).replace(DEFAULT_IMG_EXTENSION,''):
+                for bag, frame in ((x1, x2) for x1 in self.kache_ai_logs for x2 in sorted(x1[1]['frames'], key =itemgetter('frame_idx'))):
+                    img_data = None
+                    print('DEBUG:, frame_idx', frame['frame_idx'])
+                    print('DEBUG:, bag', bag)
 
-                                img_data = frame
-                                break
+                    imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
+
+                    uris2paths = {}
+                    # uris = set([(idx, x) for idx, x in enumerate(imgs_list)])
+
+                    # for idx, uri in uris:
+                    #     if os.path.isfile(uri) and DEFAULT_IMG_EXTENSION in str(uri):
+                    #         print(uri)
+                    if frame['hash_key'] in [self.path_leaf(uri).replace(DEFAULT_IMG_EXTENSION,'') for uri in imgs_list]:
+                        img_data = frame
+                        uri = frame['dataset_path']
 
                         fname = self.path_leaf(uri)
                         img_key, uris2paths[uri] = self.load_training_img_uri(uri)
@@ -172,10 +202,17 @@ class DataFormatter(object):
                         if img_data:
                             if img_data.get('time_readable', None):
                                 readable_time = img_data['time_readable'].split(' ')[3]
-                            else:
+                            elif img_data.get('time_nsec', None):
                                 readable_time = self.format_from_nanos(int(img_data['time_nsec'])).split(' ')[3]
+                            else:
+                                readable_time = str(datetime.now())
 
-                            hour = int(readable_time.split(':')[0])
+                            if ':' in readable_time and ' ' not in readable_time.split(':')[0]:
+                                hour = int(readable_time.split(':')[0])
+                            else:
+                                hour = 12
+
+
                             if (hour > 4 and hour < 6) or (hour > 17 and hour < 19):
                                 timeofday = 'dawn/dusk'
                             elif hour > 6 and hour < 17:
@@ -183,12 +220,29 @@ class DataFormatter(object):
                             else:
                                 timeofday = 'night'
 
-                            vid_name = img_data['bag_name']
+                            if img_data.get('bag_name', None):
+                                vid_name = img_data['bag_name']
+                            else:
+                                vid_name = ''
+
                             scene = 'highway'
-                            timestamp = img_data['time_sec']
+
+                            if img_data.get('time_sec', None):
+                                timestamp = img_data['time_sec']
+                            else:
+                                timestamp = 10000
+
                             dataset_path = img_data['dataset_path']
-                            lat = img_data['latitude']
-                            long = img_data['longitude']
+
+                            if img_data.get('latitude', None):
+                                lat = img_data['latitude']
+                            else:
+                                lat = ''
+
+                            if img_data.get('longitude', None):
+                                long = img_data['longitude']
+                            else:
+                                long = ''
                         else:
                             vid_name = None
                             timeofday = 'daytime'
@@ -208,7 +262,7 @@ class DataFormatter(object):
                                                  'coco_path': dataset_path,
                                                  'width': width,
                                                  'height': height,
-                                                 'index': int(idx),
+                                                 'index': int(frame['frame_idx']),
                                                  'timestamp': int(timestamp),
                                                  'videoName':vid_name,
                                                  'attributes': {'weather': 'clear', 'scene': scene, 'timeofday': timeofday},
@@ -224,7 +278,7 @@ class DataFormatter(object):
 
                 ann_idx = 0
                 for uri, img_anns in anns:
-                    img_key, uris2paths[uri] = self.load_training_img_uri(uri)
+                    img_key, uris2paths[uri] = self.load_training_img_uri( self.path_leaf(uri) )
                     for ann in img_anns:
                         label = {}
                         label['id'] = int(ann_idx)
@@ -415,11 +469,9 @@ class DataFormatter(object):
                                 label['kache_label_id'] = int(ann_idx)
                                 label['attributes'] = ann.get('attributes', None)
                                 if ann.get('attributes', None):
-                                    label['attributes'] = {'Occluded': ann['attributes'].get('occluded', False),
-                                                           'Truncated': ann['attributes'].get('truncated', False),
-                                                           'Traffic Light Color': [0, 'NA']}
+                                    label['attributes'] = ann['attributes']
 
-                                label['manual'] =  ann.get('manualShape', True)
+                                label['manualShape'] =  ann.get('manualShape', True)
                                 label['manualAttributes'] = ann.get('manualAttributes', True)
                                 label['poly2d'] = ann.get('poly2d', None)
                                 label['box3d'] = ann.get('box3d', None)
@@ -450,7 +502,8 @@ class DataFormatter(object):
 
 
             # Convert attributes to Categories
-            self.attributes_to_cats('trafficLightColor')
+            if convert_attributes:
+                self.attributes_to_cats('trafficLightColor')
 
             # Save object to picklefile
             pickle_dict = {'images':self._images,'annotations':self.trn_anno}
@@ -466,23 +519,23 @@ class DataFormatter(object):
             for fname in self._images.keys():
                 if self._images[fname].get('labels', None):
                     for label in [l for l in  self._images[fname]['labels'] if l['category'] == 'traffic light' and l.get('attributes', None)]:
-                        if label['attributes'].get('trafficLightColor', None):
-                            if label['attributes']['trafficLightColor'][1].lower() == 'green':
+                        if label['attributes'].get('TrafficLightColor', None):
+                            if label['attributes']['trafficLightColor'][1].lower() == 'green' or label['attributes']['trafficLightColor'][1].lower() == 'g'  or label['attributes']['trafficLightColor'][0] == 1:
                                 label['category'] = 'traffic light-green'
-                            elif label['attributes']['trafficLightColor'][1].lower() == 'yellow':
+                            elif label['attributes']['trafficLightColor'][1].lower() == 'yellow' or label['attributes']['trafficLightColor'][1].lower() == 'y'  or label['attributes']['trafficLightColor'][0] == 2:
                                 label['category'] = 'traffic light-amber'
-                            elif label['attributes']['trafficLightColor'][1].lower() == 'red':
+                            elif label['attributes']['trafficLightColor'][1].lower() == 'red' or label['attributes']['trafficLightColor'][1].lower() == 'r'  or label['attributes']['trafficLightColor'][0] == 3:
                                 label['category'] = 'traffic light-red'
                             else:
                                 label['category'] = 'traffic light'
 
                         # Support both old and new bdd formats
                         elif label['attributes'].get('Traffic Light Color', None):
-                            if label['attributes']['Traffic Light Color'][1].lower() == 'g':
+                            if label['attributes']['Traffic Light Color'][1].lower() == 'g' or label['attributes']['Traffic Light Color'][0] == 1:
                                 label['category'] = 'traffic light-green'
-                            elif label['attributes']['Traffic Light Color'][1].lower() == 'y':
+                            elif label['attributes']['Traffic Light Color'][1].lower() == 'y' or label['attributes']['Traffic Light Color'][0] == 2:
                                 label['category'] = 'traffic light-amber'
-                            elif label['attributes']['Traffic Light Color'][1].lower() == 'r':
+                            elif label['attributes']['Traffic Light Color'][1].lower() == 'r' or label['attributes']['Traffic Light Color'][0] == 3:
                                 label['category'] = 'traffic light-red'
                             else:
                                 label['category'] = 'traffic light'
@@ -630,7 +683,7 @@ class DataFormatter(object):
             delete_marker = True
 
             for  ann in merging_set.trn_anno[fname]:
-                ## Only include images with annotations corresponding to this category_id
+                ## Only include images with annotations corresponding to this categories in the include array
                 if ann['category'].replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() in include:
                     delete_marker = False
                     break
@@ -649,7 +702,7 @@ class DataFormatter(object):
 
         # Set exclude to all remaining categories if None
         if not exclude:
-            exclude = [x for x in self.category_names if x not in include]
+            exclude = [x for x in self.category_names if x.replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() not in include]
         exclude = [x.replace(' ','').lower() for x in exclude]
         # If any categories in exclude, remove any image associated with categories.
         for fname in merging_set._images.keys():
@@ -698,7 +751,7 @@ class DataFormatter(object):
             print('No images left to merge')
 
 
-        self.export(format = Format.scalabel)
+        self.export(format = Format.scalabel, paginate = False)
         self.show_data_distribution()
 
         # Save object to picklefile
@@ -820,6 +873,8 @@ class DataFormatter(object):
 
         ## Add to coco_training_dir
         os.makedirs(os.path.join(self.coco_directory, 'images' , self.trainer_prefix.split('_')[1]), exist_ok = True)
+        ## TODO: FIX Key Error Bug
+        print(fname)
         img_uri = self.maybe_download(fname,
                                     os.path.join(self.coco_directory, 'images' , self.trainer_prefix.split('_')[1], img_key))
         return img_key, img_uri
@@ -865,6 +920,17 @@ class DataFormatter(object):
             with open(self.names_config, 'w+') as writer:
                 for category in sorted(set(self.category_names)):
                     writer.write(category+'\n')
+
+
+
+
+    def collect_config(self):
+        yaml = YAML()
+        with open(STATIC_NAMES_CONFIG_YML, "r") as reader:
+            code = yaml.load(reader)
+            print(type(code))
+            yaml.dump(codge, sys.stdout)
+
 
     def generate_names_yml(self):
         self.names_config_yml = os.path.join(self.config_dir, self.trainer_prefix+'_names.yml')
@@ -1026,7 +1092,7 @@ class DataFormatter(object):
             json.dump(coco_output, output_json_file)
 
 
-    def data_grouper(self, iterable, n, fillvalue=None):
+    def data_grouper(self, iterable, n, fillvalue={}):
         "Collect data into fixed-length chunks or blocks"
         # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx
         args = [iter(iterable)] * n
@@ -1060,7 +1126,7 @@ class DataFormatter(object):
             yolo_converter = os.path.join(os.path.abspath(val_par_path), 'convert2Yolo/example.py')
         else:
             # yolo_converter = os.path.join(os.path.abspath(par_path),'darknet', 'convert2Yolo/example.py')
-            yolo_converter = os.path.join('/media/dean/datastore1/datasets/darknet', 'convert2Yolo/example.py')
+            yolo_converter = os.path.join('/media/dean/datastore/datasets/darknet', 'convert2Yolo/example.py')
 
         os.makedirs(os.path.abspath(os.path.join(darknet_conversion_results, os.pardir)), exist_ok = True)
         if not os.path.exists(darknet_conversion_results):
