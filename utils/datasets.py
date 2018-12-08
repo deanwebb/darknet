@@ -714,7 +714,7 @@ class DataFormatter(object):
                 #     delete_marker = True
                 #     break
                 # elif
-                if ann['category'].replace(' ', '').lower() not in include:
+                if ann['category'].replace(' ', '').lower() in exclude:
                     ann_deletions.append(ann)
 
             # if delete_marker:
