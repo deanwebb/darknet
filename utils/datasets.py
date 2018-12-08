@@ -117,7 +117,7 @@ class DataFormatter(object):
     def __init__(self, annotations_list, s3_bucket = None, check_s3 = False,
                     input_format=Format.scalabel, output_path=os.getcwd(), pickle_file = None,
                     trainer_prefix = None, coco_annotations_file = None, darknet_manifast = None,
-                    image_list = None, use_cache = False, use_static_categories = False, convert_attributes = True):
+                    image_list = None, use_cache = False, use_static_categories = False, convert_attributes = True, combine_categories = True):
 
         self.input_format = input_format
         self._images = OrderedDict()
@@ -503,6 +503,12 @@ class DataFormatter(object):
             if convert_attributes:
                 self.attributes_to_cats('trafficLightColor')
 
+            if combine_categories:
+                self.combine_cats(source_cats = ['bicycle'], target_cat='bike')
+                self.combine_cats(source_cats = ['motorcycle'], target_cat='motor')
+                self.combine_cats(source_cats = ['stop sign'], target_cat='traffic sign')
+                self.combine_cats(source_cats = ['construct-pole', 'construct-cone', 'construct-barrel'], target_cat='construct-post')
+
             # Save object to picklefile
             pickle_dict = {'images':self._images,'annotations':self.trn_anno}
             print('Saving to Pickle File:', self._pickle_file)
@@ -511,6 +517,19 @@ class DataFormatter(object):
 
         print('Length of COCO Images', len(self._images))
         self.show_data_distribution()
+
+    def combine_cats(self, source_cats, target_cat):
+        for fname in self._images.keys():
+            if self._images[fname].get('labels', None):
+                for label in self._images[fname]['labels']:
+                    if label['category'] in source_cats:
+                        label['category'] = target_cat
+
+                        # Update corresponding annotation
+                        for ann in self.trn_anno[fname]:
+                            if ann['id'] == label['id']:
+                                # overwrite annotation with new label
+                                ann = label
 
     def attributes_to_cats(self, attribute):
         if attribute == 'trafficLightColor':
@@ -714,7 +733,7 @@ class DataFormatter(object):
                 #     delete_marker = True
                 #     break
                 # elif
-                if ann['category'].replace(' ', '').lower() in exclude:
+                if ann['category'].replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() in exclude:
                     ann_deletions.append(ann)
 
             # if delete_marker:
@@ -724,7 +743,7 @@ class DataFormatter(object):
 
         # Prune Images
         for fname in deletions:
-            print('PRUNING the IMAGE deletions ({} total)'.format(len(deletions)))
+            print('PRUNING the IMAGE {} ({} total)'.format(fname, len(deletions)))
             merging_set._images.pop(fname)
             merging_set.trn_anno.pop(fname)
 
