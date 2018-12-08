@@ -79,7 +79,7 @@ SOURCE_KACHE_DIR =  os.path.join('/media/dean/datastore/datasets/kache_ai', 'fra
 # STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/cfg/COCO_train2014_0000.names'
 # STATIC_NAMES_CONFIG_YML = '/media/dean/datastore/datasets/darknet/data/cfg/kache_category_names.yml'
 
-ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/backup/yolov3-bdd100k_4300.weights"
+ANNOTATION_MODEL =  "/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/backup/yolov3-bdd100k_11000.weights"
 BASE_DATA_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/', 'cfg', 'bdd100k.data')
 BASE_MODEL_CONFIG = os.path.join('/media/dean/datastore/datasets/darknet/detectors/construction-zones_1gpu_0003lr_64bat_16sd_48ep_3sb/', 'cfg', 'yolov3-bdd100k.cfg')
 STATIC_NAMES_CONFIG = '/media/dean/datastore/datasets/darknet/data/cfg/COCO_train2014_0000.names'
@@ -181,8 +181,6 @@ class DataFormatter(object):
 
                 for bag, frame in ((x1, x2) for x1 in self.kache_ai_logs for x2 in sorted(x1[1]['frames'], key =itemgetter('frame_idx'))):
                     img_data = None
-                    print('DEBUG:, frame_idx', frame['frame_idx'])
-                    print('DEBUG:, bag', bag)
 
                     imgs_list = glob.glob(os.path.join(self.input_imgs_dir, '*'+DEFAULT_IMG_EXTENSION))
 
@@ -702,7 +700,8 @@ class DataFormatter(object):
 
         # Set exclude to all remaining categories if None
         if not exclude:
-            exclude = [x for x in self.category_names if x.replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() not in include]
+            exclude = [x for x in merging_set.category_names if x.replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() not in include]
+            print('EXCLUDING CATEGORIES:', exclude)
         exclude = [x.replace(' ','').lower() for x in exclude]
         # If any categories in exclude, remove any image associated with categories.
         for fname in merging_set._images.keys():
@@ -722,23 +721,25 @@ class DataFormatter(object):
 
         # Prune Images
         for fname in deletions:
+            print('PRUNING the following IMAGE deletions ({} total): \n\n{}'.format(len(deletions), deletions))
             merging_set._images.pop(fname)
             merging_set.trn_anno.pop(fname)
 
         # Prune annotations
         if reject_new_categories:
+            print('PRUNING the following ANNOTATION deletions ({} total): \n\n{}'.format(len(ann_deletions), [x['category'] for x in ann_deletions]))
             for fname in merging_set._images.keys():
                 for ann in ann_deletions:
-                    if merging_set.trn_anno.get(fname, None) and ann in merging_set.trn_anno[fname]:
+                    if merging_set.trn_anno.get(fname, None) and ann in merging_set.trn_anno[fname] and ann['category'].replace(' ', '').lower() not in include:
                         merging_set.trn_anno[fname].remove(ann)
-                    if merging_set._images.get(fname, None) and ann in merging_set._images[fname]['labels']:
+                    if merging_set._images.get(fname, None) and ann in merging_set._images[fname]['labels'] and ann['category'].replace(' ', '').lower() not in include:
                         merging_set._images[fname]['labels'].remove(ann)
 
 
         # Merge Dataset
         for img_key in merging_set._images.keys():
-            self._images[img_key] = merging_set._images[img_key]
-            self.trn_anno[img_key] = merging_set.trn_anno[img_key]
+            self._images[img_key] = copy.deepcopy(merging_set._images[img_key])
+            self.trn_anno[img_key] = copy.deepcopy(merging_set.trn_anno[img_key])
 
         if len( merging_set._images) > 0:
             merge_len = len(merging_set._images)
@@ -833,9 +834,13 @@ class DataFormatter(object):
                 shutil.copyfile(source_uri, destination)
             # Try checking coco path for image (since they are mixed)
             elif os.path.exists(os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))):
-                    source_uri = os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
-                    os.makedirs(os.path.split(destination)[0], exist_ok = True)
-                    shutil.copyfile(source_uri, destination)
+                source_uri = os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.path_leaf(source_uri))
+                os.makedirs(os.path.split(destination)[0], exist_ok = True)
+                shutil.copyfile(source_uri, destination)
+            elif os.path.exists(os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.trainer_prefix+self.path_leaf(source_uri))):
+                source_uri = os.path.join(SOURCE_COCO_DIR, 'images', self.trainer_prefix.split('_')[1], self.trainer_prefix+self.path_leaf(source_uri))
+                os.makedirs(os.path.split(destination)[0], exist_ok = True)
+                shutil.copyfile(source_uri, destination)
             elif urllib.parse.urlparse(source_uri).scheme != "":
                 destination, _ = urllib.request.urlretrieve(source_uri, destination)
                 statinfo = os.stat(destination)
@@ -873,8 +878,6 @@ class DataFormatter(object):
 
         ## Add to coco_training_dir
         os.makedirs(os.path.join(self.coco_directory, 'images' , self.trainer_prefix.split('_')[1]), exist_ok = True)
-        ## TODO: FIX Key Error Bug
-        print(fname)
         img_uri = self.maybe_download(fname,
                                     os.path.join(self.coco_directory, 'images' , self.trainer_prefix.split('_')[1], img_key))
         return img_key, img_uri
