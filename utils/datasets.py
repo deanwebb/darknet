@@ -680,16 +680,18 @@ class DataFormatter(object):
         for fname in merging_set._images.keys():
             delete_marker = True
 
-            for  ann in merging_set.trn_anno[fname]:
+            for ann in merging_set.trn_anno[fname]:
                 ## Only include images with annotations corresponding to this categories in the include array
                 if ann['category'].replace('motorcycle', 'motor').replace('bicycle', 'bike').replace('stop sign', 'traffic sign').replace(' ', '').lower() in include:
                     delete_marker = False
                     break
 
             if delete_marker:
+                print('APPENDING to delete list:', fname)
                 deletions.append(fname)
 
         for fname in deletions:
+            print('PRUNING the IMAGE deletions ({} total)'.format(len(deletions)))
             merging_set._images.pop(fname)
             merging_set.trn_anno.pop(fname)
 
@@ -705,29 +707,30 @@ class DataFormatter(object):
         exclude = [x.replace(' ','').lower() for x in exclude]
         # If any categories in exclude, remove any image associated with categories.
         for fname in merging_set._images.keys():
-            delete_marker = False
-            for  ann in merging_set.trn_anno[fname]:
+            # delete_marker = False
+            for ann in merging_set.trn_anno[fname]:
                 ## Exclude images with annotations corresponding to this category_id
-                if ann['category'].replace(' ', '').lower() in exclude:
-                    delete_marker = True
-                    break
-                elif ann['category'].replace(' ', '').lower() not in self.category_names:
+                # if ann['category'].replace(' ', '').lower() not in include:
+                #     delete_marker = True
+                #     break
+                # elif
+                if ann['category'].replace(' ', '').lower() not in include:
                     ann_deletions.append(ann)
 
-            if delete_marker:
-                # Remove images
-                deletions.append(fname)
+            # if delete_marker:
+            #     # Remove images
+            #     deletions.append(fname)
 
 
         # Prune Images
         for fname in deletions:
-            print('PRUNING the following IMAGE deletions ({} total): \n\n{}'.format(len(deletions), deletions))
+            print('PRUNING the IMAGE deletions ({} total)'.format(len(deletions)))
             merging_set._images.pop(fname)
             merging_set.trn_anno.pop(fname)
 
         # Prune annotations
         if reject_new_categories:
-            print('PRUNING the following ANNOTATION deletions ({} total): \n\n{}'.format(len(ann_deletions), [x['category'] for x in ann_deletions]))
+            print('PRUNING the ANNOTATION deletions ({} total)'.format(len(ann_deletions)))
             for fname in merging_set._images.keys():
                 for ann in ann_deletions:
                     if merging_set.trn_anno.get(fname, None) and ann in merging_set.trn_anno[fname] and ann['category'].replace(' ', '').lower() not in include:
