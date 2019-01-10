@@ -46,7 +46,7 @@ import urllib
 from urlparse import urlparse
 from datetime import datetime
 import pynmea2
-
+import darknet_annotator
 
 import cv2
 import numpy as np
@@ -66,7 +66,7 @@ from math_utils.fast import check_rectangle_collision
 
 FRAME_FIELDS = ["bag","time_nsec","frame_path",'id','track_id','manual','poly2d','box3d','category','box2d_x1','box2d_y1','box2d_x2','box2d_y2','manualAttributes']
 TRACK_FIELDS = ['track_id','frame','hits','age','category','box2d_x1','box2d_y1','box2d_x2','box2d_y2']
-CLASSES_LIST = "car,truck,person,construct-post,rider"
+CLASSES_LIST = "bike,bus,car,construct-equipment,construct-post,construct-sign,motor,person,rider,traffic light,traffic light-amber,traffic light-green,traffic light-red,traffic sign,traffic sign-slow_sign,traffic sign-speed_sign,traffic sign-stop_sign,trailer,train,truck"
 DETECTION_TOPIC = "/perception/darknet_ros/bounding_boxes"
 IMAGE_STREAM_TOPIC = "/sensors/usb_cam/rgb/image_raw_f/compressed"
 CAR_STATE_TOPIC = "/dbw/toyota_dbw/car_state"
@@ -81,6 +81,11 @@ SW_COLOR_HIST_FEAT_FLAG = True
 
 S3URI = 'kache-scalabel/kache_ai/tracking_frames/'
 EXCLUDE_CATS = ['lane', 'drivable area']
+ANNOTATION_MODEL =  "/media/kuser/Data/kache-workspace/darknet/backup/yolov3-bdd100k_68913.weights"
+BASE_DATA_CONFIG = os.path.join('/media/kuser/Data/kache-workspace/darknet/', 'cfg', 'bdd100k.data')
+BASE_MODEL_CONFIG = os.path.join('/media/kuser/Data/kache-workspace/darknet/', 'cfg', 'yolov3-bdd100k.cfg')
+STATIC_NAMES_CONFIG = '/media/kuser/Data/kache-workspace/darknet/cfg/COCO_train2014_0000.names'
+STATIC_NAMES_CONFIG_YML = '/media/kuser/Data/kache-workspace/darknet/cfg/kache_category_names.yml'
 
 
 class CSVLogger:
@@ -118,6 +123,7 @@ class ImageExporter():
         self.max_iou = FLAGS.max_iou
         self.use_cache = FLAGS.use_cache
         self.s3_bucket = FLAGS.s3_bucket
+        self.use_bag_detections = FLAGS.use_bag_detections
         self.trk_ann_idx = 0
         self.gps = None
 
@@ -126,7 +132,9 @@ class ImageExporter():
         self.frame_trks = OrderedDict()
         self.flickering_frame_imgs = OrderedDict()
         self.flickering_frame_trks = OrderedDict()
-
+        self.frame_count = 0
+        self.bag_keypath = os.path.normpath(self.save_dir)
+        self.use_static_categories = FLAGS.use_static_categories
 
 
         self.frames_dir = os.path.join(self.save_dir, "frames")
@@ -145,7 +153,7 @@ class ImageExporter():
 		    self.tracking_classes = FLAGS.classes.split(',')
         else:
             self.tracking_classes = FLAGS.classes
-
+        self.generate_configs_for_inference()
 		# Initialize Tracker
         self.sort_tracker = deep_sort.Tracker(max_iou_distance=self.max_iou,
                                               max_age=self.max_age,
@@ -162,7 +170,6 @@ class ImageExporter():
         else:
             x_coord = bbox.xmin + (bbox.xmax - bbox.xmin)/2
             y_coord = bbox.ymin + (bbox.ymax - bbox.ymin)/2
-
         return x_coord, y_coord
 
     def compute_width_height(self, bbox):
@@ -175,31 +182,40 @@ class ImageExporter():
         else:
             width = bbox.xmax - bbox.xmin
             height = bbox.ymax - bbox.ymin
-
         return width, height
 
     def bin_spatial(self, img, size=(64,64)):
-        color1 = cv2.resize(img[:,:,0], size).ravel()
-        color2 = cv2.resize(img[:,:,1], size).ravel()
-        color3 = cv2.resize(img[:,:,2], size).ravel()
-        return np.hstack((color1, color2, color3))
+        try:
+            if img is not None:
+                color1 = cv2.resize(img[:,:,0], size).ravel()
+                color2 = cv2.resize(img[:,:,1], size).ravel()
+                color3 = cv2.resize(img[:,:,2], size).ravel()
+                return np.hstack((color1, color2, color3))
+            else: 
+                return np.hstack((np.zeros(shape=(64,64)), np.zeros((64,64)), np.zeros((64,64))))
+        except:
+            return np.hstack((np.zeros(shape=(64,64)), np.zeros((64,64)), np.zeros((64,64))))
 
-    # Define a function to compute color histogram features
     def color_hist(self, img, nbins=128):
-        # Compute the histogram of the color channels separately
-        channel1_hist = np.histogram(img[:,:,0], bins=nbins)
-        channel2_hist = np.histogram(img[:,:,1], bins=nbins)
-        channel3_hist = np.histogram(img[:,:,2], bins=nbins)
-        # Concatenate the histograms into a single feature vector
-        hist_features = np.concatenate((channel1_hist[0], channel2_hist[0], channel3_hist[0]))
-        return hist_features
+        try:
+            if img is not None:
+                # Compute the histogram of the color channels separately
+                channel1_hist = np.histogram(img[:,:,0], bins=nbins)
+                channel2_hist = np.histogram(img[:,:,1], bins=nbins)
+                channel3_hist = np.histogram(img[:,:,2], bins=nbins)
+                # Concatenate the histograms into a single feature vector
+                hist_features = np.concatenate((channel1_hist[0], channel2_hist[0], channel3_hist[0]))
+                return hist_features
+            else:
+                return np.concatenate((np.zeros(shape=(1, 128)), np.zeros(shape=(1, 128)), np.zeros(shape=(1, 128))))
+        except:
+            return np.concatenate((np.zeros(shape=(1, 128)), np.zeros(shape=(1, 128)), np.zeros(shape=(1, 128))))
 
-    # Define a function to return HOG features and visualization --
+
     def get_hog_features(self, img_chan, orient=HOG_ORIENTATIONS,
                          pix_per_cell=HOG_PIXELS_PER_CELL,
                          cell_per_block=HOG_CELLS_PER_BLOCK,
                          vis=False, feature_vec=True):
-
         features = hog(img_chan, orientations=orient, pixels_per_cell=(pix_per_cell, pix_per_cell),
                            cells_per_block=(cell_per_block, cell_per_block),
                            visualise=vis)
@@ -209,17 +225,11 @@ class ImageExporter():
         """
         Generates a feature vector for the detection
         """
-
-        # Take crop of image around bbox
-
-        # Extract features from bbox
-
         # Create a list to append feature vectors
         features = []
         cspace = 'YCrCb'
         spatial_size = (64, 64)
         hist_bins = 128
-
         if cspace != 'RGB':
             if cspace == 'HSV':
                 feature_image = cv2.cvtColor(detection_img, cv2.COLOR_RGB2HSV)
@@ -232,25 +242,23 @@ class ImageExporter():
             elif cspace == 'YCrCb':
                 feature_image = cv2.cvtColor(detection_img, cv2.COLOR_RGB2YCrCb)
         else: feature_image = np.copy(detection_img)
-
         # Apply bin_spatial() to get spatial color features
         spatial_features = self.bin_spatial(feature_image, size=spatial_size)
-
         # Apply color_hist() also with a color space option now
         hist_features = self.color_hist(feature_image, nbins=hist_bins)
-
         # Call get_hog_features() with vis=False, feature_vec=True
         hog_image = np.copy(cv2.cvtColor(detection_img, cv2.COLOR_RGB2YCrCb))
-
-        hog_shape = np.asarray(hog_image.shape)
-        if HOG_CHANNEL == 'ALL':
-            hog_features = []
-            for channel in range(len(hog_shape)):
-                hog_features.append(self.get_hog_features(hog_image[:,:,channel]))
-            hog_features = np.ravel(hog_features)
+        if hog_image is not None:
+            hog_shape = np.asarray(hog_image.shape)
+            if HOG_CHANNEL == 'ALL':
+                hog_features = []
+                for channel in range(len(hog_shape)):
+                    hog_features.append(self.get_hog_features(hog_image[:,:,channel]))
+                hog_features = np.ravel(hog_features)
+            else:
+                hog_features = self.get_hog_features(hog_image[:,:,HOG_CHANNEL])
         else:
-            hog_features = self.get_hog_features(hog_image[:,:,HOG_CHANNEL])
-
+            hog_features = np.array([0.0])
         # Append the new feature vector to the features list
         # Allow for flagged setting of feature vectors (spatial, hist, hog) must maintain the ordering
         if(SW_SPATIAL_FEAT_FLAG == True and SW_COLOR_HIST_FEAT_FLAG == True and SW_HOG_FEAT_FLAG == True):
@@ -275,12 +283,12 @@ class ImageExporter():
 
 
 
-    def tracking_callback(self, msg):
+    def tracking_callback(self, bounding_boxes):
         #======================
         # 1. Get Detections from Topic
         #======================
         detections = []
-        for bbox in msg.bounding_boxes:
+        for bbox in bounding_boxes.bounding_boxes:
             duplicate_flag = False
             for det in detections:
                 x_bool = bbox.xmin == det[0] and bbox.xmax == det[2]
@@ -288,7 +296,6 @@ class ImageExporter():
                 if x_bool and y_bool:
                     duplicate_flag = True
 
-            # Append only vehicles classified as "car"
             if not duplicate_flag and bbox.Class in self.tracking_classes:
                 detections.append([bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax, bbox.probability, bbox.Class])
 
@@ -297,68 +304,25 @@ class ImageExporter():
         for det in detections:
             width, height = self.compute_width_height(det)
             bbox_tuple = (det[0], det[1], width, height)
-
             #======================
-            # 1. Calculate features vector for detection
+            # 2. Calculate features vector for detection
             #======================
-
-            fv = self.extract_features(self.cv_image[det[1]:det[1]+det[3]-1 , det[0]:det[0]+det[2]-1, :]) # Feature Vector
-            #print(fv.ravel().tolist())
+            fv = self.extract_features(self.cv_image[int(det[1]):int(det[1])+int(det[3]), int(det[0]):int(det[0])+int(det[2]), :]) # Feature Vector
+            fv = fv.reshape(-1, 1)
+            # print(fv)
             # Fit a per-column scaler
-            X_scaler = RobustScaler().fit(fv)
+            X_scaler = StandardScaler().fit(fv)
 
             # Apply the scaler to X
             scaled_fv = X_scaler.transform(fv)
-            #print(scaled_fv.ravel().tolist())
-            d = deep_sort.Detection(bbox_tuple, det[4], scaled_fv.ravel().T, det[5])
+            # print(scaled_fv.ravel().tolist())
+            d = deep_sort.Detection(bbox_tuple, det[4], scaled_fv, det[5])
             #print("DETECTION:", d.to_tlbr(), '|',  d.confidence)
             deep_sort_dets.append(d)
 
         #======================
-        # 2. Update Tracker
+        # 3. Update Tracker
         #======================
-        """
-        Parameters
-        ----------
-        mean : ndarray
-            Mean vector of the initial state distribution.
-        covariance : ndarray
-            Covariance matrix of the initial state distribution.
-        track_id : int
-            A unique track identifier.
-        n_init : int
-            Number of consecutive detections before the track is confirmed. The
-            track state is set to `Deleted` if a miss occurs within the first
-            `n_init` frames.
-        max_age : int
-            The maximum number of consecutive misses before the track state is
-            set to `Deleted`.
-        feature : Optional[ndarray]
-            Feature vector of the detection this track originates from. If not None,
-            this feature is added to the `features` cache.
-
-        Attributes
-        ----------
-        mean : ndarray
-            Mean vector of the initial state distribution.
-        covariance : ndarray
-            Covariance matrix of the initial state distribution.
-        track_id : int
-            A unique track identifier.
-        hits : int
-            Total number of measurement updates.
-        age : int
-            Total number of frames since first occurance.
-        time_since_update : int
-            Total number of frames since last measurement update.
-        state : TrackState
-            The current track state.
-        features : List[ndarray]
-            A cache of features. On each measurement update, the associated feature
-            vector is added to this list.
-        """
-
-
         self.prev_trks = self.sort_tracker.tracks
         self.sort_tracker.update(deep_sort_dets)
 
@@ -368,13 +332,17 @@ class ImageExporter():
     def generate_flickering_visualizations(self):
         flickering_frames = [] # (frame_idx, track_id)
         uris2trnpaths = {}
+        self.trk_thresholds = {"car": 5000.00}  # 50x100 pixels
         for track_id in self.trk_table:
             # Get the track with the largest max_age
             oldest_trk_idx, oldest_age = max(enumerate([trk[3] for trk in self.trk_table[track_id]]), key=itemgetter(1))
-            # print("OLDEST AGE FOR TRACK", track_id,":", oldest_age)
             for track in self.trk_table[track_id]:
                 if track[3] < oldest_age - self.max_age:
-                    flickering_frames.append((track[0], track_id))
+                    trk_area = np.abs((track[1][2]-track[1][0]) * (track[1][3]-track[1][1]))
+                    if track[4] == 'car' and trk_area >= self.trk_thresholds['car']:
+                        flickering_frames.append((track[0], track_id))
+                    elif track[4] != 'car':
+                        flickering_frames.append((track[0], track_id))
 
         # Copy flickering frames from frame_imgs and create s3uris
         for flickering_frame in flickering_frames:
@@ -412,7 +380,7 @@ class ImageExporter():
         if not os.path.exists(os.path.join(self.save_dir, 'bdd100k', 'cfg')):
             os.makedirs(os.path.join(self.save_dir, 'bdd100k', 'cfg'), 0o755 )
         self.config_dir = os.path.join(self.save_dir, 'bdd100k', 'cfg')
-        self.names_config_yml = os.path.join(self.config_dir, 'flickering_trk_names.yml')
+        self.names_config_yml = os.path.join(self.config_dir, os.path.splitext(self.path_leaf(self.bag_keypath))[0]+'flickering_trk_names.yml')
 
         anns = [i for i in [d for d in [ann for ann in self.flickering_frame_trks.values()]]]
         cats = [[label['category'] for label in labels if label['category'] not in EXCLUDE_CATS] for labels in anns]
@@ -424,19 +392,33 @@ class ImageExporter():
             for category in sorted(set(self.category_names)):
                 writer.write('- name: '+category+'\n')
 
+    def generate_names_cfg(self):
+        self.names_config = os.path.join(self.config_dir, 'darknet_yolo.names')
+        if self.use_static_categories:
+            with open(STATIC_NAMES_CONFIG, "r") as reader:
+                cats = [x.strip('\n') for x in reader]
+                self.category_names =  cats
+
+            with open(self.names_config, 'w+') as writer:
+                for category in self.category_names:
+                    writer.write(category+'\n')
+        else:
+            with open(self.names_config, 'w+') as writer:
+                for category in sorted(set(self.category_names)):
+                    writer.write(category+'\n')
+
 
     def generate_annotations(self):
         ## TODO: Build ground truth in bdd format based on flickers from self.trk_table
         pass
 
-    def export(self, bag_file, force = False, paginate = False):
+    def export(self, force = False, paginate = False):
         if not os.path.exists(os.path.join(self.save_dir, 'bdd100k', 'visualizations')):
             os.makedirs(os.path.join(self.save_dir, 'bdd100k', 'visualizations'), 0o755 )
         if not os.path.exists(os.path.join(self.save_dir, 'bdd100k', 'annotations')):
             os.makedirs(os.path.join(self.save_dir, 'bdd100k', 'annotations'), 0o755 )
-        path = os.path.normpath(bag_file)
-        self.bdd100k_visualizations = os.path.join(self.save_dir, 'bdd100k/visualizations', "{}-flickering_visualizations.json".format('_'.join(path.split(os.sep))))
-        self.bdd100k_annotations = os.path.join(self.save_dir, 'bdd100k/annotations', "{}-flickering_annotations.json".format('_'.join(path.split(os.sep))))
+        self.bdd100k_visualizations = os.path.join(self.save_dir, 'bdd100k/visualizations', "{}-flickering_visualizations.json".format('_'.join(self.bag_keypath.split(os.sep))))
+        self.bdd100k_annotations = os.path.join(self.save_dir, 'bdd100k/annotations', "{}-flickering_annotations.json".format('_'.join(self.bag_keypath.split(os.sep))))
 
         self.generate_names_yml()
 
@@ -450,7 +432,7 @@ class ImageExporter():
 
         if paginate: # Prepare for Scalabel
             img_data = list(self.flickering_frame_imgs.values())
-            for i, chunk in enumerate(self.data_grouper(self.flickering_frame_imgs.values(), 500)):
+            for i, chunk in enumerate(self.data_grouper(self.flickering_frame_imgs.values(), 1000)):
                 tmp =sorted(list(copy.deepcopy(chunk)), key=itemgetter('index'))
                 lblidx = 0
                 for tmpidx, d in enumerate(tmp):
@@ -486,23 +468,120 @@ class ImageExporter():
         return tail or ntpath.basename(head)
 
     def save_cache(self, bag_file):
-        path = os.path.normpath(bag_file)
-        self._pickle_file = os.path.join(self.save_dir, "{}.pickle".format('_'.join(path.split(os.sep))))
+        self._pickle_file = os.path.join(self.save_dir, "{}.pickle".format(self.bag_keypath))
         # Save Data to Pickle
         pickle_dict = {"bagfile": bag_file, "frame_imgs": self.frame_imgs, "trk_table": self.trk_table, "frame_count": self.frame_count}
         print('Saving to Pickle File:', self._pickle_file)
         with open(self._pickle_file,"wb") as pickle_out:
             cPickle.dump(pickle_dict, pickle_out)
         # Inialize CSV Logger / Save Data to CSV
-        self.csv_frames_logger = CSVLogger(self.save_dir, path+'FRAMES.csv', FRAME_FIELDS)
-        self.csv_trks_logger = CSVLogger(self.save_dir, path+'TRACKS.csv', TRACK_FIELDS)
-        self.save_frame_trks_to_csv(bag_file)
-        self.save_trk_table_to_csv(bag_file)
+        self.csv_frames_logger = CSVLogger(self.save_dir, os.path.splitext(self.bag_keypath)[0]+'FRAMES.csv', FRAME_FIELDS)
+        self.csv_trks_logger = CSVLogger(self.save_dir, os.path.splitext(self.bag_keypath)[0]+'TRACKS.csv', TRACK_FIELDS)
+        try:
+            self.save_frame_trks_to_csv(bag_file)
+            self.save_trk_table_to_csv(bag_file)
+        except: pass
+
+
+    def generate_configs_for_inference(self):
+        # Override data config
+        self.current_inference_dir = os.path.join(self.save_dir, 'inference')
+        if not os.path.exists(os.path.join(self.current_inference_dir, 'data')):
+            os.makedirs(os.path.join(self.current_inference_dir, 'data'))
+        if not os.path.exists(os.path.join(self.current_inference_dir, 'cfg')):
+            os.makedirs(os.path.join(self.current_inference_dir, 'cfg'))
+        self.models_path = os.path.abspath(os.path.join(self.current_inference_dir, 'models'))
+        if not os.path.exists(self.models_path):
+            os.makedirs(self.models_path)
+        self.inference_model = os.path.join(self.models_path, self.path_leaf(ANNOTATION_MODEL))
+        shutil.copy(ANNOTATION_MODEL, self.inference_model)
+
+        self.generate_names_yml()
+        self.generate_names_cfg()
+
+        # Override Data config
+        self.current_data_cfg = self.parse_data_config(BASE_DATA_CONFIG)
+        self.current_data_cfg = self.inject_data_config(self.current_data_cfg)
+        self.current_data_cfg_path = self.save_data_config(self.current_data_cfg, os.path.join(self.current_inference_dir, 'cfg', self.path_leaf(BASE_DATA_CONFIG)))
+
+        # Override model config
+        self.current_model_cfg = self.parse_model_config(BASE_MODEL_CONFIG)
+        # self.current_model_cfg = self.inject_model_config(self.current_model_cfg)
+        self.current_model_cfg_path = self.save_model_config(self.current_model_cfg, os.path.join(self.current_inference_dir, 'cfg', self.path_leaf(BASE_MODEL_CONFIG)))
+
+    def parse_model_config(self, path):
+        """Parses the yolo-v3 layer configuration file and returns module definitions"""
+        file = open(path, 'r')
+        lines = file.read().split('\n')
+        lines = [x for x in lines if x and not x.startswith('#')]
+        lines = [x.rstrip().lstrip() for x in lines] # get rid of fringe whitespaces
+        module_defs = []
+        for line in lines:
+            if line.startswith('['): # This marks the start of a new block
+                module_defs.append({})
+                module_defs[-1]['type'] = line[1:-1].rstrip()
+                if module_defs[-1]['type'] == 'convolutional':
+                    module_defs[-1]['batch_normalize'] = 0
+            else:
+                key, value = line.split("=")
+                value = value.strip()
+                module_defs[-1][key.rstrip()] = value.strip()
+
+        return module_defs
+
+    def parse_data_config(self, path):
+        """Parses the data configuration file"""
+        options = dict()
+        options['gpus'] = '0,1'
+        with open(path, 'r') as fp:
+            lines = fp.readlines()
+        for line in lines:
+            line = line.strip()
+            if line == '' or line.startswith('#'):
+                continue
+            key, value = line.split('=')
+            options[key.strip()] = value.strip()
+        return options
+
+
+    def save_model_config(self, model_defs, path, overwrite = False):
+        if not os.path.exists(path) or overwrite == True:
+            """Saves the yolo-v3 layer configuration file"""
+            with open(path, 'w') as writer:
+                for block in model_defs:
+                    writer.write('['+ block['type'] +']'+'\n')
+                    [writer.write(str(k)+'='+str(v)+'\n') for k,v in block.items() if k != 'type']
+                    writer.write('\n')
+        return path
+
+
+    def save_data_config(self, data_config, path, overwrite = False):
+        """Saves the yolo-v3 data configuration file"""
+        if not os.path.exists(path) or overwrite == True:
+            with open(path, 'w') as writer:
+                [writer.write(str(k)+'='+str(v)+'\n') for k,v in data_config.items()]
+        return path
+
+    def inject_model_config(self, model_config):
+        for i, block in enumerate(model_config):
+            if block['type'] == 'yolo':
+                block['classes'] = len(self.category_names)
+                model_config[i-1]['filters'] = (len(self.category_names)+5)*3
+        return model_config
+
+    def inject_data_config(self, data_config):
+        data_config['classes'] = len(self.category_names)
+        data_config['names'] = self.names_config
+        data_config['backup'] = self.models_path
+        num_gpus = 0
+        # data_config['gpus'] = ','.join(str(i) for i in range(num_gpus))
+
+
+        return data_config
 
     def load_cache(self, bag_file):
         # Initialize cache
-        path = os.path.normpath(bag_file)
-        self._pickle_file = os.path.join(self.save_dir, "{}.pickle".format('_'.join(path.split(os.sep))))
+        self._pickle_file = os.path.join(self.save_dir, "{}.pickle".format(os.path.splitext(self.bag_keypath)[0]))
         if self._pickle_file and os.path.exists(self._pickle_file) and self.use_cache:
             pickle_in = open(self._pickle_file,"rb")
             pickle_dict = cPickle.load(pickle_in)
@@ -524,7 +603,7 @@ class ImageExporter():
                 log_dict['box2d_y1'] = missed_track[1][1]
                 log_dict['box2d_x2'] = missed_track[1][2]
                 log_dict['box2d_y2'] = missed_track[1][3]
-                self.csv_logger.record(log_dict)
+                self.csv_trks_logger.record(log_dict)
 
     def save_frame_trks_to_csv(self, bag_file):
         print('Saving to CSV File', self.csv_frames_logger)
@@ -533,7 +612,7 @@ class ImageExporter():
                 log_dict =dict()
                 log_dict["bag"] = bag_file.split("/")[-1]
                 log_dict["time_nsec"] = frame
-                log_dict["frame_path"] = frame_trks[frame]['url']
+                log_dict["frame_path"] = self.frame_imgs[frame]['url']
                 log_dict['id'] = label['id']
                 log_dict['track_id'] = label['track_id']
                 log_dict['manual'] = label['manual']
@@ -545,7 +624,7 @@ class ImageExporter():
                 log_dict['box2d_x2'] = label['box2d']['x2']
                 log_dict['box2d_y2'] = label['box2d']['y2']
                 log_dict['manualAttributes'] = label['manualAttributes']
-                self.csv_logger.record(log_dict)
+                self.csv_frames_logger.record(log_dict)
 
     def append_frame_trks(self, frame, tracks, dets):
         for det in dets:
@@ -583,7 +662,7 @@ class ImageExporter():
             label['manual'] = False
             label['poly2d'] = None
             label['box3d'] = None
-            label['category'] = 'tracked-'+track.category
+            label['category'] = 'tracked-'+str(track.category)
 
             trk_bb = track.to_tlwh()
             label['box2d'] = {'x1': float(trk_bb[0]),
@@ -592,7 +671,6 @@ class ImageExporter():
                           'y2': float(trk_bb[1])-1 + float(trk_bb[3])}
             label['manualAttributes'] = False
 
-            # if label['track_id'] not in set([x['track_id'] for x in self.frame_trks[frame] if label['track_id'] is not None]):
             self.frame_imgs[frame]['labels'].append(label)
             self.frame_trks[frame].append(label)
 
@@ -606,19 +684,20 @@ class ImageExporter():
                 else:
                     self.trk_table[track.track_id] = [(frame, track.to_tlbr(), track.hits, track.age, track.category)]
 
-                print("TRACKING DICT", track.track_id, " UPDATED:",self.trk_table[track.track_id][-1])
+                    #print("TRACKING DICT", track.track_id, " UPDATED:",self.trk_table[track.track_id][-1])
 
     def process_frames(self):
         print("\nMining Frames for Flicker Detection ......\o/ \o/ \o/ \o/....... \n")
         rosbag_files = sorted(glob.glob(os.path.join(self.bag_dir, "*.bag")))
         # Init extraction loop
-        self.frame_count = 0
         msg_count = 0
+
 
         # Iterate through bags
         rosbag_files = sorted(glob.glob(os.path.join(self.bag_dir, "*.bag")))
         for bag_file in tqdm(rosbag_files, unit='bag'):
             self.frame_imgs, self.trk_table, self.frame_count = self.load_cache(bag_file)
+            self.bag_keypath = '_'.join(os.path.normpath(bag_file).split(os.sep))
 
             if not self.frame_imgs or not self.trk_table:
                 # Open bag file. If corrupted, skip the file
@@ -648,6 +727,7 @@ class ImageExporter():
                                 if msg_count % self.skip_rate == 0:
 
                                     self.cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+                                    self.img_msg_header = msg.header
                                     image_name = "frame%010d_%s.jpg" % (self.frame_count, str(msg.header.stamp.to_nsec()))
                                     img_path = os.path.join(self.frames_dir, image_name)
                                     cv2.imwrite(img_path, self.cv_image)
@@ -698,55 +778,96 @@ class ImageExporter():
                                     self.frame_count += 1
 
                         ## Get Tracking Data ##
-                        for topic, msg, t in bag.read_messages():
-                            if topic == DETECTION_TOPIC:
-                                # Find corresponding frame for detections message
-                                found_frame = False
-                                for frame in sorted(self.frame_imgs.keys()):
-                                    if int(msg.header.stamp.to_nsec()) > frame-3.333e7 and int(msg.header.stamp.to_nsec()) < frame+3.333e7:
-                                        found_frame = True
-
-                                        # Collect tracker_msgs
-                                        detections, tracks = self.tracking_callback(msg)
-                                        # Append to frame annotations table
-                                        self.append_frame_trks(frame, tracks, detections)
-                                        # Append to track annotations table
-                                        self.append_trk_table(frame, tracks)
-                                        # Debugger statement to make monitor data extraction
-                                        print("FRAME TIMESTAMP:",frame)
-                                        print("DETECTION TIMESTAMP:",int(msg.header.stamp.to_nsec()))
-                                        print('IMG PATH:',self.frame_imgs[frame]['url'])
-                                        break
-
-                                if not found_frame: # Try a wider time window and try to shuffle detection to appropriate frame
-                                    for i, frame in enumerate(sorted(self.frame_imgs.keys())):
-                                        if int(msg.header.stamp.to_nsec()) > frame-3.783e7 and int(msg.header.stamp.to_nsec()) < frame+3.783e7:
+                        if self.use_bag_detections:
+                            for topic, msg, t in bag.read_messages():
+                                if topic == DETECTION_TOPIC:
+                                    # Find corresponding frame for detections message
+                                    found_frame = False
+                                    for frame in sorted(self.frame_imgs.keys()):
+                                        if int(msg.header.stamp.to_nsec()) > frame-3.333e7 and int(msg.header.stamp.to_nsec()) < frame+3.333e7:
                                             found_frame = True
-                                            # Collect tracks
+
+                                            # Collect tracker_msgs
                                             detections, tracks = self.tracking_callback(msg)
-                                            # Append to buffer
-                                            if len(self.frame_imgs[frame]) < 2: # Check if already assigned detections to this frame
-                                                idx = frame
-                                            elif i > 0 and len(self.frame_imgs[self.frame_imgs.keys()[i-1]]) < 2: # Assign detections to the previous frame if empty
-                                                idx = self.frame_imgs.keys()[i-1]
-                                            elif i < len(self.frame_imgs.keys())-1 and len(self.frame_imgs[self.frame_imgs.keys()[i+1]]) < 2: # Assign detections to the next frame if empty
-                                                idx = self.frame_imgs.keys()[i+1]
-                                            else:
-                                                idx = frame
                                             # Append to frame annotations table
-                                            self.append_frame_trks(idx, tracks, detections)
+                                            self.append_frame_trks(frame, tracks, detections)
                                             # Append to track annotations table
-                                            self.append_trk_table(idx, tracks)
+                                            self.append_trk_table(frame, tracks)
                                             # Debugger statement to make monitor data extraction
-                                            print("FRAME TIMESTAMP:",idx)
+                                            print("FRAME TIMESTAMP:",frame)
                                             print("DETECTION TIMESTAMP:",int(msg.header.stamp.to_nsec()))
-                                            print('IMG PATH:', self.frame_imgs[idx]['url'])
+                                            print('IMG PATH:',self.frame_imgs[frame]['url'])
                                             break
+
+                                    if not found_frame: # Try a wider time window and try to shuffle detection to appropriate frame
+                                        for i, frame in enumerate(sorted(self.frame_imgs.keys())):
+                                            if int(msg.header.stamp.to_nsec()) > frame-3.783e7 and int(msg.header.stamp.to_nsec()) < frame+3.783e7:
+                                                found_frame = True
+                                                # Collect tracks
+                                                detections, tracks = self.tracking_callback(msg)
+                                                # Append to buffer
+                                                if len(self.frame_imgs[frame]) < 2: # Check if already assigned detections to this frame
+                                                    idx = frame
+                                                elif i > 0 and len(self.frame_imgs[self.frame_imgs.keys()[i-1]]) < 2: # Assign detections to the previous frame if empty
+                                                    idx = self.frame_imgs.keys()[i-1]
+                                                elif i < len(self.frame_imgs.keys())-1 and len(self.frame_imgs[self.frame_imgs.keys()[i+1]]) < 2: # Assign detections to the next frame if empty
+                                                    idx = self.frame_imgs.keys()[i+1]
+                                                else:
+                                                    idx = frame
+                                                # Append to frame annotations table
+                                                self.append_frame_trks(idx, tracks, detections)
+                                                # Append to track annotations table
+                                                self.append_trk_table(idx, tracks)
+                                                # Debugger statement to make monitor data extraction
+                                                print("FRAME TIMESTAMP:",idx)
+                                                print("DETECTION TIMESTAMP:",int(msg.header.stamp.to_nsec()))
+                                                print('IMG PATH:', self.frame_imgs[idx]['url'])
+                                                break
+                        else:
+                            anns = darknet_annotator.annotate(os.path.abspath(self.frames_dir), os.path.abspath(self.current_model_cfg_path), os.path.abspath(self.inference_model), os.path.abspath(self.current_data_cfg_path))
+                            img_stamps = OrderedDict()
+
+                            for uri, img_detections in sorted(anns):
+                                img_timestamp = int(uri.split('_')[-1].replace('.jpg', '').replace('.png', '')) # Get from fpath
+                                img_stamps[img_timestamp] = (uri, img_detections)
+
+
+                            ann_idx = 0
+                            for img_timestamp in sorted(img_stamps.keys()):
+                                dets = []
+                                # Get corresponding image
+                                uri = img_stamps[img_timestamp][0]
+                                bboxes = BoundingBoxes()
+                                bboxes.header.stamp =  datetime.now()
+                                bboxes.image_header = self.img_msg_header
+
+                                for detection in img_stamps[img_timestamp][1]:
+                                    # Build Detections
+                                    bbox = BoundingBox()
+                                    bbox.xmin, bbox.ymin = detection['box2d']['x1'], detection['box2d']['y1']
+                                    bbox.xmax, bbox.ymax = detection['box2d']['x2'], detection['box2d']['y2']
+                                    bbox.Class =  detection['category']
+                                    bbox.class_id = 0
+                                    bbox.probability = 0.99
+                                    bboxes.bounding_boxes.append(bbox)
+
+                                # Collect tracker_msgs
+                                self.cv_image = cv2.imread(os.path.abspath(os.path.join(self.frames_dir, uri)))
+                                detections, tracks = self.tracking_callback(bboxes)
+                                # Append to frame annotations table
+                                self.append_frame_trks(img_timestamp, tracks, detections)
+                                # Append to track annotations table
+                                self.append_trk_table(img_timestamp, tracks)
+                                # Debugger statement to make monitor data extraction
+                                # print("FRAME TIMESTAMP:",img_timestamp)
+                                # print("DETECTION TIMESTAMP:",int(msg.header.stamp.to_nsec()))
+                                # print('IMG PATH:',self.frame_imgs[img_timestamp]['url'])
+
                         self.save_cache(bag_file)
                     msg_count = 0
                 except ROSBagException:
                     print("\n",bag_file, "Failed!  || ")
-                    print(str(ROSBagException.value), '\n')
+                    print(str(ROSBagException), '\n')
                     continue
 
             ## Generate JSON Object in BDD Format ##
@@ -771,6 +892,8 @@ if __name__ == '__main__':
     parser.add_argument('-ma',"--max_age", help="maximum number of missed detections allowed to continue to be considered a track. Default: 10", default=10)
     parser.add_argument('-s', "--save_dir", help="path to save extracted frames")
     parser.add_argument('-uc',"--use_cache", dest='use_cache', default=True, action='store_true')
+    parser.add_argument('-us',"--use_static_categories", dest='use_static_categories', default=True, action='store_true')
+    parser.add_argument('-ub',"--use_bag_detections", dest='use_bag_detections', default=False, action='store_true')
     parser.add_argument('-sr', "--skip_rate", type=int, default=1, help="skip every [x] frames. value of 1 skips no frames")
     parser.add_argument('-s3', "--s3_bucket", action="store", help="s3 bucket to lookup and store frames", default=S3URI)
     parser.add_argument('-c', "--classes", action="store", help="tracking classes list. Enter classes as commma-separated values. Default: 'car,truck,person'", default=CLASSES_LIST)
